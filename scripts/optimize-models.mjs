@@ -25,7 +25,7 @@ for (let i = 0; i < args.length; i++) {
   } else positional.push(args[i])
 }
 const [walkPath, talkPath, outPath = 'public/models/sam.glb'] = positional
-if (!walkPath) throw new Error('usage: optimize-models.mjs <walk.glb> [talk.glb] [out.glb] [--basecolor img] [--roughness img] [--normal img] [--size N] [--quality Q] [--smooth-normals]')
+if (!walkPath) throw new Error('usage: optimize-models.mjs <walk.glb> [talk.glb] [out.glb] [--basecolor img] [--roughness img] [--normal img] [--orm img] [--size N] [--quality Q] [--smooth-normals]')
 const size = Number(flags.size ?? 2048)
 const quality = Number(flags.quality ?? 84)
 
@@ -34,11 +34,17 @@ const io = new NodeIO().registerExtensions(ALL_EXTENSIONS).registerDependencies(
 
 const doc = await io.read(walkPath)
 const root = doc.getRoot()
-const walkAnim = root.listAnimations()[0]
+// Clip naming: the walk file may already carry both clips (a Blender export); otherwise the
+// first clip is the walk and the talk clip comes from the second file.
+const anims = root.listAnimations()
+const byHint = (hint) => anims.find((a) => a.getName().toLowerCase().includes(hint))
+const walkAnim = byHint('walk') ?? anims[0]
 if (walkAnim) walkAnim.setName('walk')
-for (const extra of root.listAnimations().slice(1)) extra.dispose()
+const talkInWalkFile = byHint('talk')
+if (talkInWalkFile && talkInWalkFile !== walkAnim) talkInWalkFile.setName('talk')
+for (const extra of anims) if (extra !== walkAnim && extra !== talkInWalkFile) extra.dispose()
 
-if (talkPath) {
+if (talkPath && talkPath !== '-') {
   const talkDoc = await io.read(talkPath)
   const src = talkDoc.getRoot().listAnimations()[0]
   if (!src) throw new Error('talk file has no animation')
@@ -91,6 +97,12 @@ for (const mat of root.listMaterials()) {
     mat.setMetallicRoughnessTexture(tex).setRoughnessFactor(1)
   } else if (!mat.getMetallicRoughnessTexture()) {
     mat.setRoughnessFactor(Number(flags['rough-factor'] ?? 0.62))
+  }
+  if (flags.orm && isTarget) {
+    // An occlusion/roughness/metallic pack (R=AO, G=roughness, B=metallic) is exactly the glTF layout.
+    const { data, mime } = await png(flags.orm)
+    const tex = doc.createTexture('orm').setImage(data).setMimeType(mime)
+    mat.setMetallicRoughnessTexture(tex).setRoughnessFactor(1).setOcclusionTexture(tex).setOcclusionStrength(Number(flags['ao-strength'] ?? 0.6))
   }
   if (flags.normal && isTarget) {
     const { data, mime } = await png(flags.normal)
@@ -161,7 +173,8 @@ await doc.transform(
   dedup(),
   prune({ keepLeaves: true, keepAttributes: false }),
   resample(),
-  textureCompress({ encoder: sharp, targetFormat: 'webp', resize: [size, size], quality }),
+  textureCompress({ encoder: sharp, targetFormat: 'webp', resize: [size, size], quality, slots: /^(baseColor|emissive)/ }),
+  textureCompress({ encoder: sharp, targetFormat: 'webp', resize: [Number(flags['data-size'] ?? 2048), Number(flags['data-size'] ?? 2048)], quality: Number(flags['data-quality'] ?? 90), slots: /^(normal|metallicRoughness|occlusion)/ }),
   meshopt({ encoder: MeshoptEncoder, level: 'medium' }),
 )
 await io.write(outPath, doc)

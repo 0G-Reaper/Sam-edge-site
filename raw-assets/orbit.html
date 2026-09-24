@@ -1,0 +1,39 @@
+<!doctype html><html><body style="margin:0;background:#0a1220">
+<script type="importmap">{"imports":{"three":"/node_modules/three/build/three.module.js","three/addons/":"/node_modules/three/examples/jsm/"}}</script>
+<script type="module">
+import * as THREE from 'three'
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js'
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
+const q = new URLSearchParams(location.search)
+const src = q.get('src'), frac = +(q.get('frac') || 1)
+const W = innerWidth, H = innerHeight, cols = 4, rows = 2, tw = W / cols, th = H / rows
+const renderer = new THREE.WebGLRenderer({ antialias: true }); renderer.setSize(W, H); renderer.setPixelRatio(1); renderer.toneMapping = THREE.AgXToneMapping; renderer.setScissorTest(true); document.body.appendChild(renderer.domElement)
+const scene = new THREE.Scene(); scene.background = new THREE.Color('#0a1220')
+scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture; scene.environmentIntensity = 0.75
+scene.add(new THREE.HemisphereLight('#dfe9ff', '#0a1220', 0.9))
+const key = new THREE.DirectionalLight('#fff1e0', 2.6); key.position.set(2.2, 4.2, 3.2); scene.add(key)
+const fill = new THREE.DirectionalLight('#cfe3ff', 0.8); fill.position.set(-2.6, 2.4, 3); scene.add(fill)
+const rim = new THREE.DirectionalLight('#4fd8c7', 1.2); rim.position.set(-3, 2.5, -2); scene.add(rim)
+const loader = new GLTFLoader(); loader.setMeshoptDecoder(MeshoptDecoder)
+loader.load(src, (g) => {
+  const s = g.scene; scene.add(s)
+  s.traverse((o) => { if (o.isMesh && o.material && 'metalness' in o.material) { o.material.envMapIntensity = 0.9 } })
+  const clipIndex = +(q.get('clip') || 0), t = +(q.get('t') || 0)
+  if (g.animations.length) { const mixer = new THREE.AnimationMixer(s); mixer.clipAction(g.animations[clipIndex] || g.animations[0]).play(); mixer.update(t); s.updateMatrixWorld(true) }
+  const box = new THREE.Box3().setFromObject(s); const size = box.getSize(new THREE.Vector3()); const c = box.getCenter(new THREE.Vector3())
+  const fov = 30, aspect = tw / th
+  const focusH = size.y * frac, focusC = c.clone(); focusC.y = box.max.y - focusH / 2
+  const dist = (focusH / 2) / Math.tan(THREE.MathUtils.degToRad(fov / 2)) * 1.15 + Math.max(size.x, size.z) / 2
+  const cam = new THREE.PerspectiveCamera(fov, aspect, 0.01, 100)
+  const yaws = [0, 45, 90, 135, 180, 225, 270, 315]
+  yaws.forEach((deg, i) => {
+    const a = THREE.MathUtils.degToRad(deg)
+    cam.position.set(focusC.x + Math.sin(a) * dist, focusC.y + focusH * 0.05, focusC.z + Math.cos(a) * dist); cam.lookAt(focusC)
+    const x = (i % cols) * tw, y = H - (Math.floor(i / cols) + 1) * th
+    renderer.setViewport(x, y, tw, th); renderer.setScissor(x, y, tw, th); renderer.render(scene, cam)
+  })
+  window.__info = JSON.stringify({ size: size.toArray().map((v) => +v.toFixed(3)), verts: (() => { let n = 0; s.traverse((o) => { if (o.isMesh) n += o.geometry.attributes.position.count }); return n })(), clips: g.animations.map((a) => a.name) })
+  window.__done = true
+}, undefined, (e) => { console.error(e); window.__done = 'error' })
+</script></body></html>
