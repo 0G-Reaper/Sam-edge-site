@@ -7,8 +7,7 @@ import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment
 import { SCRIPT, markIntroSeen } from '../lib/intro'
 import { Logo, Mute, Sound } from './Icons'
 
-const WALK_URL = '/models/sam-walk.glb'
-const TALK_URL = '/models/sam-talk.glb'
+const MODEL_URL = '/models/sam.glb'
 const audioUrl = (i: number) => `/audio/sam-${i}.mp3`
 
 const START_X = 3.4
@@ -58,24 +57,25 @@ function Loaded({ onReady }: { onReady: () => void }) {
 
 function Sam({ phase, onArrived, onExited }: { phase: Phase; onArrived: () => void; onExited: () => void }) {
   const group = useRef<THREE.Group>(null)
-  const walk = useGLTF(WALK_URL, false, true)
-  const talk = useGLTF(TALK_URL, false, true)
+  const walk = useGLTF(MODEL_URL, false, true)
   const clips = useMemo(() => {
+    const all = walk.animations
+    const byName = (n: string) => all.find((c) => c.name === n)
     const out: THREE.AnimationClip[] = []
-    const w = walk.animations[0]
+    const w = byName('walk') ?? all[0]
     if (w) {
       const c = w.clone()
       c.name = 'walk'
       out.push(c)
     }
-    const t = talk.animations[0]
+    const t = byName('talk') ?? all[1]
     if (t) {
       const c = t.clone()
       c.name = 'talk'
       out.push(c)
     }
     return out
-  }, [walk.animations, talk.animations])
+  }, [walk.animations])
   const { actions } = useAnimations(clips, group)
   const model = useMemo(() => {
     const s = walk.scene
@@ -97,6 +97,8 @@ function Sam({ phase, onArrived, onExited }: { phase: Phase; onArrived: () => vo
   }, [walk.scene])
   const arrived = useRef(false)
   const exited = useRef(false)
+  const phaseStart = useRef<number | null>(null)
+  const lastPhase = useRef<Phase>('loading')
 
   useEffect(() => {
     const a = actions as Record<string, THREE.AnimationAction | null>
@@ -118,12 +120,19 @@ function Sam({ phase, onArrived, onExited }: { phase: Phase; onArrived: () => vo
     }
   }, [phase, actions])
 
-  useFrame((_, dt) => {
+  // Motion is driven by wall-clock time, so the walk takes the same seconds on a slow phone as on a desktop.
+  useFrame((state, dt) => {
     const g = group.current
     if (!g) return
-    const d = Math.min(dt, 0.05)
+    const now = state.clock.elapsedTime
+    if (lastPhase.current !== phase) {
+      lastPhase.current = phase
+      phaseStart.current = now
+    }
+    const t = now - (phaseStart.current ?? now)
+    const d = Math.min(dt, 0.1)
     if (phase === 'enter') {
-      g.position.x = Math.max(END_X, g.position.x - SPEED * d)
+      g.position.x = Math.max(END_X, START_X - SPEED * t)
       if (g.position.x <= END_X && !arrived.current) {
         arrived.current = true
         onArrived()
@@ -131,8 +140,9 @@ function Sam({ phase, onArrived, onExited }: { phase: Phase; onArrived: () => vo
     } else if (phase === 'talk') {
       g.rotation.y = THREE.MathUtils.damp(g.rotation.y, FACE_CAMERA, 5, d)
     } else if (phase === 'exit') {
-      g.rotation.y = THREE.MathUtils.damp(g.rotation.y, FACE_LEFT, 7, d)
-      if (Math.abs(g.rotation.y - FACE_LEFT) < 0.3) g.position.x -= SPEED * d
+      const turn = Math.min(1, t / 0.5)
+      g.rotation.y = FACE_CAMERA + (FACE_LEFT - FACE_CAMERA) * (turn * turn * (3 - 2 * turn))
+      if (t > 0.35) g.position.x = END_X - SPEED * (t - 0.35)
       if (g.position.x < EXIT_X && !exited.current) {
         exited.current = true
         onExited()
@@ -340,5 +350,4 @@ export default function SamIntro({ onDone }: { onDone: () => void }) {
   )
 }
 
-useGLTF.preload(WALK_URL, false, true)
-useGLTF.preload(TALK_URL, false, true)
+useGLTF.preload(MODEL_URL, false, true)

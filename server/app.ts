@@ -63,7 +63,7 @@ export function createApp(opts: AppOptions) {
         imgSrc: ["'self'", 'data:', 'blob:'],
         fontSrc: ["'self'"],
         mediaSrc: ["'self'", 'blob:'],
-        connectSrc: ["'self'"],
+        connectSrc: ["'self'", 'blob:'],
         workerSrc: ["'self'", 'blob:'],
         frameAncestors: ["'none'"],
         baseUri: ["'self'"],
