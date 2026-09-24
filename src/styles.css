@@ -14,7 +14,7 @@
   --down: #f0555f;
   --text: #e9f2f6;
   --muted: #98abba;
-  --dim: #63788a;
+  --dim: #7a8fa2;
   --display: 'Sora Variable', 'Sora', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --body: 'Manrope Variable', 'Manrope', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --mono: 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -199,7 +199,7 @@ section { position: relative; padding-block: clamp(84px, 11vw, 150px); }
 @keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
 .spark__pulse { animation: sparkpulse 2s ease-out infinite; transform-box: fill-box; transform-origin: center; }
 @keyframes sparkpulse { 0% { transform: scale(0.6); opacity: 0.6; } 100% { transform: scale(2.4); opacity: 0; } }
-.idx__foot { font-size: 0.74rem; color: var(--dim); }
+.idx__foot { font-size: 0.75rem; color: var(--dim); }
 @media (max-width: 960px) {
   .hero__grid { grid-template-columns: 1fr; }
   .hero__visual { min-height: 0; order: -1; }
@@ -221,13 +221,13 @@ section { position: relative; padding-block: clamp(84px, 11vw, 150px); }
 @keyframes floaty { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-7px); } }
 @media (max-width: 960px) {
   .clocks { position: static; display: flex; flex-wrap: wrap; justify-content: center; gap: 0.5rem; pointer-events: auto; }
-  .clock { position: static; animation: none; padding: 0.45rem 0.65rem; font-size: 0.74rem; }
+  .clock { position: static; animation: none; padding: 0.45rem 0.65rem; font-size: 0.75rem; }
 }
 @media (prefers-reduced-motion: reduce) { .clock { animation: none; } }
 
 /* ============ explainer (scroll film) ============ */
 .explainer { padding: 0; }
-.scrub { position: relative; height: 330vh; }
+.scrub { position: relative; height: 240vh; }
 .scrub__sticky { position: sticky; top: 0; height: 100vh; height: 100svh; overflow: hidden; display: grid; align-content: space-between; }
 .scrub__video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0.75; transform: scale(1.02); }
 .scrub__shade { position: absolute; inset: 0; background: linear-gradient(180deg, var(--bg) 0%, rgba(5, 10, 18, 0.35) 22%, rgba(5, 10, 18, 0.2) 55%, rgba(5, 10, 18, 0.7) 82%, var(--bg) 100%); }
@@ -241,7 +241,7 @@ section { position: relative; padding-block: clamp(84px, 11vw, 150px); }
 .idea__n { font: 600 0.72rem/1 var(--mono); color: var(--accent); letter-spacing: 0.14em; }
 .idea p { color: var(--muted); font-size: 0.95rem; line-height: 1.55; }
 @media (max-width: 860px) {
-  .scrub { height: 300vh; }
+  .scrub { height: 220vh; }
   .ideas { grid-template-columns: 1fr; }
   .idea { display: none; }
   .idea.is-active { display: grid; }
@@ -278,7 +278,7 @@ section { position: relative; padding-block: clamp(84px, 11vw, 150px); }
 .tilt img { width: 100%; height: auto; border-radius: 24px; -webkit-mask-image: linear-gradient(180deg, #000 82%, transparent 100%); mask-image: linear-gradient(180deg, #000 82%, transparent 100%); }
 .tilt__badge { position: absolute; left: 6%; bottom: 10%; padding: 0.7rem 0.95rem; border-radius: 14px; background: var(--glass-2); border: 1px solid var(--line-2); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); display: grid; gap: 0.15rem; transform: translateZ(40px); box-shadow: 0 20px 40px -20px rgba(0, 0, 0, 0.8); }
 .tilt__badge b { font-family: var(--display); font-size: 0.9rem; }
-.tilt__badge span { font-size: 0.74rem; color: var(--muted); }
+.tilt__badge span { font-size: 0.75rem; color: var(--muted); }
 @media (max-width: 900px) { .appband__grid { grid-template-columns: 1fr; } .tilt { max-width: 520px; margin-inline: auto; } }
 
 /* ============ who we are ============ */
@@ -351,3 +351,24 @@ section { position: relative; padding-block: clamp(84px, 11vw, 150px); }
 .intro__dots i.is-on { background: var(--accent); }
 .intro__hint { color: var(--muted); font-size: 0.82rem; letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600; }
 @media (max-width: 640px) { .intro__caption p { font-size: 1.05rem; } .intro__top .brand__tag { display: none; } }
+
+/* Polish pass from the design audit: minimum type size and touch targets. */
+.brand__tag,
+.clock__state,
+.idx__sym,
+.idea__n,
+.eyebrow {
+  font-size: 0.75rem;
+}
+.footer__links a,
+.footer__links button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
+}
+@media (max-width: 760px) {
+  .nav__sheet a,
+  .nav__sheet button {
+    min-height: 2.75rem;
+  }
+}

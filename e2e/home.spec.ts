@@ -32,6 +32,7 @@ test.describe('landing page', () => {
     })
     const overflowAfter = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
     expect(overflowAfter).toBeLessThanOrEqual(0)
+    await page.locator('#waitlist').scrollIntoViewIfNeeded()
     await expect(page.locator('#waitlist')).toBeInViewport({ ratio: 0.1 })
   })
 

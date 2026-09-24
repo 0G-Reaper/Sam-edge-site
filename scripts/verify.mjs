@@ -32,7 +32,7 @@ async function shoot(name, width, height, opts = {}) {
     })
     await page.waitForTimeout(900)
   }
-  if (opts.scrollTo !== undefined) { await page.evaluate((y) => window.scrollTo(0, y), opts.scrollTo); await page.waitForTimeout(1200) }
+  if (opts.scrollTo !== undefined) { await page.evaluate((y) => { document.documentElement.style.scrollBehavior = 'auto'; window.scrollTo(0, y) }, opts.scrollTo); await page.waitForTimeout(1500) }
   await page.screenshot({ path: `${out}/${name}.png`, fullPage: opts.full ?? false })
   const info = await page.evaluate(() => ({ title: document.title, h: document.documentElement.scrollHeight, w: document.documentElement.scrollWidth, intro: !!document.querySelector('.intro'), globe: !!document.querySelector('.globe canvas'), cards: document.querySelectorAll('.idx').length }))
   console.log(name, JSON.stringify(info))

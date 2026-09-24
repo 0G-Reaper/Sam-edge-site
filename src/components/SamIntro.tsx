@@ -321,6 +321,7 @@ export default function SamIntro({ onDone }: { onDone: () => void }) {
               shadow-normalBias={0.02}
             />
             <directionalLight position={[-2.6, 2.4, 3]} intensity={0.8} color="#cfe3ff" />
+            <directionalLight position={[0.6, 2.2, 4.5]} intensity={0.55} color="#ffe9d6" />
             <directionalLight position={[-3, 2.5, -2]} intensity={1.2} color="#4fd8c7" />
             <directionalLight position={[3, 1.5, -3]} intensity={0.6} color="#8b7cff" />
             <Suspense fallback={null}>
