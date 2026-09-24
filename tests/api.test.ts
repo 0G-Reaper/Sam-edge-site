@@ -151,6 +151,27 @@ describe('admin export', () => {
 })
 
 describe('pages and headers', () => {
+  it('redirects every other hostname to the canonical one, except the health check', async () => {
+    const app = build(openDb(':memory:'), { canonicalHost: 'sam.example' })
+    const res = await app.request('/how?x=1', { headers: { host: 'www.sam.example' } })
+    expect(res.status).toBe(301)
+    expect(res.headers.get('location')).toBe('https://sam.example/how?x=1')
+    expect((await app.request('/api/markets', { headers: { host: 'web-production.up.railway.app' } })).status).toBe(301)
+    expect((await app.request('/', { headers: { host: 'sam.example' } })).status).toBe(200)
+    expect((await app.request('/healthz', { headers: { host: 'healthcheck.internal' } })).status).toBe(200)
+  })
+
+  it('publishes security.txt only when a contact is configured', async () => {
+    expect((await build(openDb(':memory:')).request('/.well-known/security.txt')).status).toBe(404)
+    const app = build(openDb(':memory:'), { canonicalHost: 'sam.example', securityContact: 'mailto:security@sam.example' })
+    const res = await app.request('/.well-known/security.txt', { headers: { host: 'sam.example' } })
+    expect(res.status).toBe(200)
+    const text = await res.text()
+    expect(text).toContain('Contact: mailto:security@sam.example')
+    expect(text).toContain('Canonical: https://sam.example/.well-known/security.txt')
+    expect(text).toMatch(/Expires: \d{4}-/)
+  })
+
   it('serves the shell with the site config and absolute origin filled in', async () => {
     const app = build(openDb(':memory:'))
     const res = await app.request('/', { headers: { host: 'sam.example', 'x-forwarded-proto': 'https' } })

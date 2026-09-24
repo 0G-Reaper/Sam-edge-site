@@ -25,6 +25,10 @@ export interface AppOptions {
   /** Directory of built client files, relative to the process working directory. */
   staticRoot?: string
   production?: boolean
+  /** The one public hostname; every other Host is redirected to it (the health check excepted). */
+  canonicalHost?: string
+  /** A mailto: or https: URI published at /.well-known/security.txt (RFC 9116). */
+  securityContact?: string
   now?: () => number
 }
 
@@ -88,6 +92,27 @@ export function createApp(opts: AppOptions) {
   )
 
   app.get('/healthz', (c) => c.text('ok'))
+
+  // One public origin: the www form, the platform's own domain and any forged Host header are all
+  // sent to the canonical host, so links, the canonical tag and HSTS agree on a single origin.
+  if (opts.canonicalHost) {
+    const canonical = opts.canonicalHost.toLowerCase()
+    app.use('*', async (c, next) => {
+      const host = (c.req.header('host') ?? '').toLowerCase().replace(/:\d+$/, '')
+      if (host === canonical || c.req.path === '/healthz') return next()
+      const url = new URL(c.req.url)
+      return c.redirect(`https://${canonical}${url.pathname}${url.search}`, 301)
+    })
+  }
+
+  if (opts.securityContact) {
+    app.get('/.well-known/security.txt', (c) => {
+      const lines = [`Contact: ${opts.securityContact}`, `Expires: ${new Date(now() + 365 * 86_400_000).toISOString()}`, 'Preferred-Languages: en']
+      if (opts.canonicalHost) lines.push(`Canonical: https://${opts.canonicalHost.toLowerCase()}/.well-known/security.txt`)
+      c.header('Cache-Control', 'public, max-age=86400')
+      return c.text(lines.join('\n') + '\n')
+    })
+  }
 
   app.use('/api/*', async (c, next) => {
     c.header('Cache-Control', 'no-store')

@@ -26,6 +26,8 @@ const app = createApp({
   indexHtml: existsSync(indexPath) ? readFileSync(indexPath, 'utf8') : undefined,
   staticRoot: existsSync(clientDir) ? relative(process.cwd(), clientDir) || '.' : undefined,
   production,
+  canonicalHost: cleanHost(process.env.CANONICAL_HOST),
+  securityContact: cleanContact(process.env.SECURITY_CONTACT),
 })
 
 const server = serve({ fetch: app.fetch, port, hostname: '0.0.0.0' }, (info) => {
@@ -40,6 +42,18 @@ function cleanUrl(value: string | undefined): string | undefined {
   } catch {
     return undefined
   }
+}
+
+function cleanHost(value: string | undefined): string | undefined {
+  if (!value) return undefined
+  const host = value.trim().toLowerCase()
+  return /^[a-z0-9.-]{1,253}$/.test(host) ? host : undefined
+}
+
+function cleanContact(value: string | undefined): string | undefined {
+  if (!value) return undefined
+  const v = value.trim()
+  return /^(mailto:[^\s@]+@[^\s@]+\.[^\s@]+|https:\/\/\S+)$/.test(v) ? v : undefined
 }
 
 function shutdown() {
