@@ -3,14 +3,18 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=22.13" },
+  "engines": {
+    "node": ">=22.13"
+  },
   "scripts": {
     "dev": "vite",
     "dev:server": "tsx watch server/index.ts",
     "build": "node scripts/build-globe.mjs && vite build && node scripts/build-server.mjs",
     "start": "node dist/server/index.js",
     "test": "vitest run",
-    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.server.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.server.json --noEmit",
+    "e2e": "playwright test",
+    "e2e:ui": "playwright test --ui"
   },
   "dependencies": {
     "@fontsource-variable/jetbrains-mono": "^5.2.5",
@@ -30,6 +34,7 @@
     "@gltf-transform/core": "^4.2.0",
     "@gltf-transform/extensions": "^4.2.0",
     "@gltf-transform/functions": "^4.2.0",
+    "@playwright/test": "^1.63.0",
     "@types/node": "^22.18.0",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",

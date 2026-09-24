@@ -38,13 +38,40 @@ function Env() {
     const pmrem = new THREE.PMREMGenerator(gl)
     const tex = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
     scene.environment = tex
-    scene.environmentIntensity = 0.5
+    scene.environmentIntensity = 0.75
     return () => {
       scene.environment = null
       tex.dispose()
       pmrem.dispose()
     }
   }, [gl, scene])
+  return null
+}
+
+// Two framings: a wide shot for the walk-in and walk-off, and a medium shot while she speaks
+// so her face carries the introduction. Portrait phones keep a little more distance.
+const SHOT_WIDE = { pos: [0, 1.2, 4.8], look: [0, 0.95, 0] } as const
+const SHOT_TALK = { pos: [0.1, 1.36, 2.7], look: [0.02, 1.22, 0] } as const
+
+function CameraRig({ phase }: { phase: Phase }) {
+  const { camera, size } = useThree()
+  const look = useRef(new THREE.Vector3(SHOT_WIDE.look[0], SHOT_WIDE.look[1], SHOT_WIDE.look[2]))
+  useFrame((state, dt) => {
+    const d = Math.min(dt, 0.1)
+    const talk = phase === 'talk'
+    const shot = talk ? SHOT_TALK : SHOT_WIDE
+    const zoomOut = size.height > size.width ? 1.22 : 1
+    const k = talk ? 1.6 : 2.4
+    camera.position.x = THREE.MathUtils.damp(camera.position.x, shot.pos[0], k, d)
+    camera.position.y = THREE.MathUtils.damp(camera.position.y, shot.pos[1], k, d)
+    camera.position.z = THREE.MathUtils.damp(camera.position.z, shot.pos[2] * zoomOut, k, d)
+    look.current.x = THREE.MathUtils.damp(look.current.x, shot.look[0], k, d)
+    look.current.y = THREE.MathUtils.damp(look.current.y, shot.look[1], k, d)
+    look.current.z = THREE.MathUtils.damp(look.current.z, shot.look[2], k, d)
+    const t = state.clock.elapsedTime
+    const sway = talk ? 0.012 : 0
+    camera.lookAt(look.current.x + Math.sin(t * 0.7) * sway, look.current.y + Math.sin(t * 0.9 + 1) * sway * 0.6, look.current.z)
+  })
   return null
 }
 
@@ -90,7 +117,14 @@ function Sam({ phase, onArrived, onExited }: { phase: Phase; onArrived: () => vo
       const m = o as THREE.Mesh
       if (m.isMesh) {
         m.castShadow = true
+        m.receiveShadow = true
         m.frustumCulled = false
+        const mat = m.material as THREE.MeshStandardMaterial
+        if (mat && 'roughness' in mat) {
+          mat.envMapIntensity = 0.9
+          if (mat.emissive) mat.emissive.setScalar(0)
+          mat.needsUpdate = true
+        }
       }
     })
     return s
@@ -268,17 +302,27 @@ export default function SamIntro({ onDone }: { onDone: () => void }) {
       <div className="intro__stage">
         <Boundary onError={finish}>
           <Canvas
-            shadows
+            shadows="soft"
             dpr={[1, 1.5]}
             camera={{ position: [0, 1.2, 4.8], fov: 27 }}
-            gl={{ antialias: true, alpha: true, powerPreference: 'high-performance' }}
+            gl={{ antialias: true, alpha: true, powerPreference: 'high-performance', toneMapping: THREE.AgXToneMapping, toneMappingExposure: 1.05 }}
             onCreated={({ camera }) => camera.lookAt(0, 0.95, 0)}
           >
             <Env />
-            <hemisphereLight args={['#dfe9ff', '#0a1220', 0.7]} />
-            <directionalLight position={[2.5, 4.5, 3]} intensity={2.4} color="#fff3e6" castShadow shadow-mapSize={[1024, 1024]} />
-            <directionalLight position={[-3, 2.5, -2]} intensity={1.8} color="#4fd8c7" />
-            <directionalLight position={[3, 1.5, -3]} intensity={1.1} color="#8b7cff" />
+            <CameraRig phase={phase} />
+            <hemisphereLight args={['#dfe9ff', '#0a1220', 0.9]} />
+            <directionalLight
+              position={[2.2, 4.2, 3.2]}
+              intensity={2.6}
+              color="#fff1e0"
+              castShadow
+              shadow-mapSize={[2048, 2048]}
+              shadow-bias={-0.0002}
+              shadow-normalBias={0.02}
+            />
+            <directionalLight position={[-2.6, 2.4, 3]} intensity={0.8} color="#cfe3ff" />
+            <directionalLight position={[-3, 2.5, -2]} intensity={1.2} color="#4fd8c7" />
+            <directionalLight position={[3, 1.5, -3]} intensity={0.6} color="#8b7cff" />
             <Suspense fallback={null}>
               <Sam phase={phase} onArrived={onArrived} onExited={onExited} />
               <Loaded onReady={onReady} />
