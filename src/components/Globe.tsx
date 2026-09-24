@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import landUrl from '../assets/globe/land.bin?url'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { Line } from '@react-three/drei'
 import { useInView } from 'motion/react'
@@ -78,7 +79,7 @@ function useLandPoints(): Float32Array | null {
   const [pts, setPts] = useState<Float32Array | null>(null)
   useEffect(() => {
     let alive = true
-    fetch('/globe/land.bin')
+    fetch(landUrl)
       .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(String(r.status)))))
       .then((buf) => {
         const v = new Int16Array(buf)

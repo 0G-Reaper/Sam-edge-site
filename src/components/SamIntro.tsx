@@ -6,9 +6,13 @@ import * as THREE from 'three'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 import { SCRIPT, markIntroSeen } from '../lib/intro'
 import { Logo, Mute, Sound } from './Icons'
+import modelUrl from '../assets/sam.glb?url'
 
-const MODEL_URL = '/models/sam.glb'
-const audioUrl = (i: number) => `/audio/sam-${i}.mp3`
+// Assets go through the bundler so every deploy gets a new, content-hashed URL; a fixed path
+// under a long cache lifetime left phones showing an old avatar for weeks.
+const MODEL_URL = modelUrl
+const AUDIO = import.meta.glob('../assets/audio/*.mp3', { eager: true, query: '?url', import: 'default' }) as Record<string, string>
+const audioUrl = (i: number) => AUDIO[`../assets/audio/sam-${i}.mp3`] ?? ''
 
 const START_X = 3.4
 const END_X = 0.05

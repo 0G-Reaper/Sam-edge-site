@@ -1,4 +1,4 @@
-// Builds public/models/sam.glb from the raw rigged exports:
+// Builds src/assets/sam.glb (bundled with a content hash) from the raw rigged exports:
 //   node scripts/optimize-models.mjs raw-assets/sam-walk.glb raw-assets/sam-talk.glb [out.glb] \
 //        [--basecolor img] [--roughness img] [--normal img] [--size 3072] [--quality 82]
 // The walk file supplies the mesh, skin and walk clip; the talk file's clip is
@@ -24,7 +24,7 @@ for (let i = 0; i < args.length; i++) {
     else flags[args[i].slice(2)] = true
   } else positional.push(args[i])
 }
-const [walkPath, talkPath, outPath = 'public/models/sam.glb'] = positional
+const [walkPath, talkPath, outPath = 'src/assets/sam.glb'] = positional
 if (!walkPath) throw new Error('usage: optimize-models.mjs <walk.glb> [talk.glb] [out.glb] [--basecolor img] [--roughness img] [--normal img] [--orm img] [--size N] [--quality Q] [--smooth-normals] [--mirror-talk] [--material name] [--pump-color r,g,b]')
 const size = Number(flags.size ?? 2048)
 const quality = Number(flags.quality ?? 84)

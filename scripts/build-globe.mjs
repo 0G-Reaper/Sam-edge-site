@@ -23,5 +23,5 @@ for (let i = 0; i < N; i++) {
   if (geoContains(land, [lon, lat])) out.push(Math.round(lat * 100), Math.round(lon * 100))
 }
 mkdirSync('public/globe', { recursive: true })
-writeFileSync('public/globe/land.bin', Buffer.from(new Int16Array(out).buffer))
+writeFileSync('src/assets/globe/land.bin', Buffer.from(new Int16Array(out).buffer))
 console.log(`globe: ${out.length / 2} land points`)

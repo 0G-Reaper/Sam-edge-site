@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { prefersReducedMotion } from '../lib/intro'
 import { Eye, Gauge, Scale } from './Icons'
+import filmDesktop from '../assets/film/desktop.mp4'
+import filmMobile from '../assets/film/mobile.mp4'
+import filmPoster from '../assets/film/poster.jpg'
 
 const IDEAS = [
   {
@@ -32,7 +35,7 @@ export default function Explainer() {
   useEffect(() => {
     const v = videoRef.current
     if (!v || prefersReducedMotion()) return
-    v.src = window.innerWidth < 768 ? '/film/mobile.mp4' : '/film/desktop.mp4'
+    v.src = window.innerWidth < 768 ? filmMobile : filmDesktop
     const io = new IntersectionObserver(
       ([e]) => {
         if (e?.isIntersecting) v.play().catch(() => {})
@@ -65,7 +68,7 @@ export default function Explainer() {
           </p>
         </div>
         <figure className="film" aria-hidden="true">
-          <video ref={videoRef} poster="/film/poster.jpg" muted loop playsInline preload="metadata" onTimeUpdate={onTime} />
+          <video ref={videoRef} poster={filmPoster} muted loop playsInline preload="metadata" onTimeUpdate={onTime} />
           <div className="film__shade" />
           <figcaption className="film__cap">
             <i />

@@ -1,4 +1,5 @@
 import { motion, useMotionValue, useSpring, useTransform } from 'motion/react'
+import appEdge from '../assets/art/app-edge.webp'
 import type { PointerEvent } from 'react'
 import { Arrow, Doc, Pulse, Radar } from './Icons'
 import Reveal from './Reveal'
@@ -21,7 +22,7 @@ function Tilt() {
   return (
     <motion.div className="tilt" style={{ rotateX, rotateY, transformPerspective: 1400 }} onPointerMove={onMove} onPointerLeave={reset}>
       <div className="tilt__halo" aria-hidden="true" />
-      <img src="/art/app-edge.webp" alt="Three phone screens from the Edge app: the market pulse, the day's likely movers and a research view" width={1122} height={1402} loading="lazy" decoding="async" />
+      <img src={appEdge} alt="Three phone screens from the Edge app: the market pulse, the day's likely movers and a research view" width={1122} height={1402} loading="lazy" decoding="async" />
       <div className="tilt__badge" aria-hidden="true">
         <b>Edge, by SAM</b>
         <span>Calm by design. Honest about what it knows.</span>
