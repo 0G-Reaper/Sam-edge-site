@@ -82,7 +82,39 @@ function Loaded({ onReady }: { onReady: () => void }) {
   return null
 }
 
-function Sam({ phase, onArrived, onExited }: { phase: Phase; onArrived: () => void; onExited: () => void }) {
+const FADE = 0.55
+const SPEEDS = [0.84, 0.93, 1.0, 1.08]
+
+// One spoken gesture: which clip, how fast, and where in the clip it starts. The next gesture never
+// reuses the previous clip or the previous speed, so the talking never settles into a visible loop.
+function nextGesture(prev: { clip: string; speed: number } | null, names: string[]) {
+  const pool = names.length > 1 && prev ? names.filter((n) => n !== prev.clip) : names
+  const clip = pool[Math.floor(Math.random() * pool.length)] ?? names[0]!
+  const speeds = prev ? SPEEDS.filter((s) => s !== prev.speed) : SPEEDS
+  const speed = speeds[Math.floor(Math.random() * speeds.length)] ?? 1
+  return { clip, speed, from: Math.random() * 0.18 }
+}
+
+// A small rotation layered over whatever the animation mixer wrote to a bone this frame. The mixer
+// only rewrites a bone when its value changes, so the previous overlay is recognised (exact match)
+// and rebased rather than compounded frame after frame.
+class Overlay {
+  private base = new THREE.Quaternion()
+  private last = new THREE.Quaternion()
+  private offset = new THREE.Quaternion()
+  private euler = new THREE.Euler()
+  private fresh = true
+  apply(bone: THREE.Object3D, x: number, y: number, z: number) {
+    if (this.fresh || !bone.quaternion.equals(this.last)) this.base.copy(bone.quaternion)
+    this.fresh = false
+    this.euler.set(x, y, z)
+    this.offset.setFromEuler(this.euler)
+    bone.quaternion.copy(this.base).multiply(this.offset)
+    this.last.copy(bone.quaternion)
+  }
+}
+
+function Sam({ phase, beat, onArrived, onExited }: { phase: Phase; beat: number; onArrived: () => void; onExited: () => void }) {
   const group = useRef<THREE.Group>(null)
   const walk = useGLTF(MODEL_URL, false, true)
   const clips = useMemo(() => {
@@ -95,11 +127,14 @@ function Sam({ phase, onArrived, onExited }: { phase: Phase; onArrived: () => vo
       c.name = 'walk'
       out.push(c)
     }
-    const t = byName('talk') ?? all[1]
-    if (t) {
-      const c = t.clone()
-      c.name = 'talk'
-      out.push(c)
+    // Two talking clips: the gesture as animated and its mirror image, so either hand can lead.
+    for (const name of ['talk', 'talk2']) {
+      const t = byName(name) ?? (name === 'talk' ? all[1] : undefined)
+      if (t) {
+        const c = t.clone()
+        c.name = name
+        out.push(c)
+      }
     }
     return out
   }, [walk.animations])
@@ -129,6 +164,15 @@ function Sam({ phase, onArrived, onExited }: { phase: Phase; onArrived: () => vo
     })
     return s
   }, [walk.scene])
+  const bones = useMemo(
+    () => ({ head: model.getObjectByName('Head'), spine: model.getObjectByName('Spine1') ?? model.getObjectByName('Spine') }),
+    [model],
+  )
+  const overlays = useRef({ head: new Overlay(), spine: new Overlay() })
+  const gesture = useRef<{ action: THREE.AnimationAction; clip: string; speed: number } | null>(null)
+  const gestureCount = useRef(0)
+  const nodAt = useRef(-10)
+  const lastBeat = useRef(-1)
   const arrived = useRef(false)
   const exited = useRef(false)
   const phaseStart = useRef<number | null>(null)
@@ -137,20 +181,16 @@ function Sam({ phase, onArrived, onExited }: { phase: Phase; onArrived: () => vo
   useEffect(() => {
     const a = actions as Record<string, THREE.AnimationAction | null>
     const w = a.walk ?? null
-    const t = a.talk ?? null
     if (phase === 'enter' || phase === 'exit') {
-      t?.fadeOut(0.35)
+      gesture.current?.action.fadeOut(0.35)
+      gesture.current = null
       if (w) {
         w.paused = false
         w.reset().fadeIn(0.35).play()
       }
     } else if (phase === 'talk') {
-      if (t) {
-        w?.fadeOut(0.45)
-        t.reset().fadeIn(0.45).play()
-      } else if (w) {
-        w.paused = true
-      }
+      if (a.talk) w?.fadeOut(0.45)
+      else if (w) w.paused = true
     }
   }, [phase, actions])
 
@@ -172,7 +212,36 @@ function Sam({ phase, onArrived, onExited }: { phase: Phase; onArrived: () => vo
         onArrived()
       }
     } else if (phase === 'talk') {
-      g.rotation.y = THREE.MathUtils.damp(g.rotation.y, FACE_CAMERA, 5, d)
+      // Face the camera, with a slow shift of weight so she is never statue-still.
+      g.rotation.y = THREE.MathUtils.damp(g.rotation.y, FACE_CAMERA + Math.sin(now * 0.31) * 0.03, 5, d)
+      // Gestures: crossfade into the next one shortly before the current one ends.
+      const a = actions as Record<string, THREE.AnimationAction | null>
+      const names = ['talk', 'talk2'].filter((n) => a[n])
+      const cur = gesture.current
+      const left = cur ? (cur.action.getClip().duration - cur.action.time) / Math.max(0.05, cur.action.timeScale) : 0
+      if (names.length && (!cur || left < FADE || !cur.action.isRunning())) {
+        const next = nextGesture(cur, names)
+        const act = a[next.clip]!
+        if (cur && cur.action !== act) cur.action.fadeOut(FADE)
+        act.reset()
+        act.setLoop(THREE.LoopOnce, 1)
+        act.clampWhenFinished = true
+        act.timeScale = next.speed
+        act.time = next.from * act.getClip().duration
+        act.fadeIn(FADE).play()
+        gesture.current = { action: act, clip: next.clip, speed: next.speed }
+        // Exposed for the smoke test, which checks that no two consecutive gestures share a clip or speed.
+        document.documentElement.dataset.samGesture = `${next.clip}@${next.speed}#${++gestureCount.current}`
+      }
+      // A head beat as each new line starts, over a slow drift; the torso turns a little with it.
+      if (beat !== lastBeat.current) {
+        lastBeat.current = beat
+        nodAt.current = now
+      }
+      const u = (now - nodAt.current) / 0.7
+      const nod = u >= 0 && u < 1 ? Math.sin(Math.PI * u) * 0.06 : 0
+      if (bones.head) overlays.current.head.apply(bones.head, nod + Math.sin(now * 0.8) * 0.012, Math.sin(now * 0.45 + 1) * 0.025, 0)
+      if (bones.spine) overlays.current.spine.apply(bones.spine, Math.sin(now * 0.5) * 0.008, Math.sin(now * 0.27) * 0.035, 0)
     } else if (phase === 'exit') {
       const turn = Math.min(1, t / 0.5)
       g.rotation.y = FACE_CAMERA + (FACE_LEFT - FACE_CAMERA) * (turn * turn * (3 - 2 * turn))
@@ -325,7 +394,7 @@ export default function SamIntro({ onDone }: { onDone: () => void }) {
             <directionalLight position={[-3, 2.5, -2]} intensity={1.2} color="#4fd8c7" />
             <directionalLight position={[3, 1.5, -3]} intensity={0.6} color="#8b7cff" />
             <Suspense fallback={null}>
-              <Sam phase={phase} onArrived={onArrived} onExited={onExited} />
+              <Sam phase={phase} beat={line} onArrived={onArrived} onExited={onExited} />
               <Loaded onReady={onReady} />
             </Suspense>
             <ContactShadows position={[0, 0.001, 0]} opacity={0.6} scale={7} blur={2.2} far={2.4} />

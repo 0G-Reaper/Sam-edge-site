@@ -25,7 +25,7 @@ for (let i = 0; i < args.length; i++) {
   } else positional.push(args[i])
 }
 const [walkPath, talkPath, outPath = 'public/models/sam.glb'] = positional
-if (!walkPath) throw new Error('usage: optimize-models.mjs <walk.glb> [talk.glb] [out.glb] [--basecolor img] [--roughness img] [--normal img] [--orm img] [--size N] [--quality Q] [--smooth-normals]')
+if (!walkPath) throw new Error('usage: optimize-models.mjs <walk.glb> [talk.glb] [out.glb] [--basecolor img] [--roughness img] [--normal img] [--orm img] [--size N] [--quality Q] [--smooth-normals] [--mirror-talk] [--material name] [--pump-color r,g,b]')
 const size = Number(flags.size ?? 2048)
 const quality = Number(flags.quality ?? 84)
 
@@ -67,6 +67,147 @@ if (talkPath && talkPath !== '-') {
   console.log(`talk clip: ${copied}/${src.listChannels().length} channels retargeted`)
 }
 
+// A left-right mirrored copy of a clip (reflection across the x=0 plane): left and right bones swap,
+// rotations become (x, -y, -z, w) and root translations flip x. Gives a second, different gesture
+// clip from one rigging job on a symmetric skeleton.
+function mirrorClip(doc, source, name) {
+  const root = doc.getRoot()
+  const byName = new Map(root.listNodes().map((n) => [n.getName(), n]))
+  const swap = (n) => (n.startsWith('Left') ? 'Right' + n.slice(4) : n.startsWith('Right') ? 'Left' + n.slice(5) : n)
+  const buffer = root.listBuffers()[0]
+  const anim = doc.createAnimation(name)
+  for (const ch of source.listChannels()) {
+    const target = ch.getTargetNode()
+    const node = target && byName.get(swap(target.getName()))
+    const s = ch.getSampler()
+    if (!node || !s) continue
+    const out = s.getOutput().getArray().slice()
+    const path = ch.getTargetPath()
+    if (path === 'rotation') for (let i = 0; i < out.length; i += 4) { out[i + 1] = -out[i + 1]; out[i + 2] = -out[i + 2] }
+    else if (path === 'translation') for (let i = 0; i < out.length; i += 3) out[i] = -out[i]
+    const input = doc.createAccessor().setType('SCALAR').setArray(s.getInput().getArray().slice()).setBuffer(buffer)
+    const output = doc.createAccessor().setType(s.getOutput().getType()).setArray(out).setBuffer(buffer)
+    const sampler = doc.createAnimationSampler().setInput(input).setOutput(output).setInterpolation(s.getInterpolation())
+    anim.addSampler(sampler).addChannel(doc.createAnimationChannel().setTargetNode(node).setTargetPath(path).setSampler(sampler))
+  }
+  return anim
+}
+
+// Vertical grounding. A clip retargeted from another rig can carry that rig's hip height, which
+// leaves the feet floating or sunk. Forward kinematics over the leg chains at the clip's first
+// frame, compared with the rest pose, gives the hip offset that puts the lower foot on the floor.
+const quatMul = (a, b) => {
+  const [ax, ay, az, aw] = a
+  const [bx, by, bz, bw] = b
+  return [aw * bx + ax * bw + ay * bz - az * by, aw * by - ax * bz + ay * bw + az * bx, aw * bz + ax * by - ay * bx + az * bw, aw * bw - ax * bx - ay * by - az * bz]
+}
+const rotate = ([x, y, z, w], [vx, vy, vz]) => {
+  const cx = y * vz - z * vy + w * vx
+  const cy = z * vx - x * vz + w * vy
+  const cz = x * vy - y * vx + w * vz
+  return [vx + 2 * (y * cz - z * cy), vy + 2 * (z * cx - x * cz), vz + 2 * (x * cy - y * cx)]
+}
+function groundClip(doc, clip) {
+  const root = doc.getRoot()
+  const byName = new Map(root.listNodes().map((n) => [n.getName(), n]))
+  const hips = byName.get('Hips')
+  const sides = ['Left', 'Right'].map((s) => ({ foot: byName.get(`${s}Foot`), toe: byName.get(`${s}ToeBase`) })).filter((s) => s.foot && s.toe)
+  if (!hips || !sides.length) return { dy: 0 }
+  // The floor is the lowest vertex of the rest pose: the shoe soles and heel tips.
+  let floor = Infinity
+  for (const mesh of root.listMeshes()) {
+    for (const prim of mesh.listPrimitives()) {
+      const a = prim.getAttribute('POSITION')
+      if (a) floor = Math.min(floor, a.getMin([0, 0, 0])[1])
+    }
+  }
+  if (!Number.isFinite(floor)) return { dy: 0 }
+  // Mesh vertices are in scene units; the joints live under the armature node, so convert.
+  const armature = hips.getParentNode()
+  if (armature) floor = (floor - armature.getTranslation()[1]) / (armature.getScale()[1] || 1)
+  const tracks = new Map()
+  let duration = 0
+  for (const ch of clip.listChannels()) {
+    const n = ch.getTargetNode()
+    const s = ch.getSampler()
+    const path = ch.getTargetPath()
+    if (!n || !s || (path !== 'translation' && path !== 'rotation')) continue
+    const e = tracks.get(n) ?? {}
+    e[path === 'translation' ? 't' : 'r'] = s
+    tracks.set(n, e)
+    const inp = s.getInput().getArray()
+    duration = Math.max(duration, inp[inp.length - 1])
+  }
+  const sample = (s, time, k) => {
+    const inp = s.getInput().getArray()
+    const out = s.getOutput().getArray()
+    let i = 0
+    while (i < inp.length - 2 && inp[i + 1] <= time) i++
+    const j = Math.min(i + 1, inp.length - 1)
+    const f = inp[j] > inp[i] ? Math.min(1, Math.max(0, (time - inp[i]) / (inp[j] - inp[i]))) : 0
+    const v = []
+    for (let c = 0; c < k; c++) v.push(out[i * k + c] * (1 - f) + out[j * k + c] * f)
+    if (k === 4) {
+      const l = Math.hypot(...v) || 1
+      return v.map((x) => x / l)
+    }
+    return v
+  }
+  const stop = hips.getParentNode()
+  const fk = (node, time) => {
+    const chain = []
+    for (let n = node; n && n !== stop; n = n.getParentNode()) chain.unshift(n)
+    let p = [0, 0, 0]
+    let q = [0, 0, 0, 1]
+    for (const n of chain) {
+      const tr = tracks.get(n)
+      const t = time === null || !tr?.t ? n.getTranslation() : sample(tr.t, time, 3)
+      const r = time === null || !tr?.r ? n.getRotation() : sample(tr.r, time, 4)
+      const rt = rotate(q, t)
+      p = [p[0] + rt[0], p[1] + rt[1], p[2] + rt[2]]
+      q = quatMul(q, r)
+    }
+    return { p, q }
+  }
+  const conj = ([x, y, z, w]) => [-x, -y, -z, w]
+  // Each shoe's contact points (heel tip, ball of the foot) fixed in its foot's frame, from the rest pose.
+  const contacts = sides.map((s) => {
+    const a = fk(s.foot, null)
+    const t = fk(s.toe, null)
+    const world = [[a.p[0], floor, a.p[2] - 3.5], [t.p[0], floor, t.p[2]]]
+    return { foot: s.foot, pts: world.map((p) => rotate(conj(a.q), [p[0] - a.p[0], p[1] - a.p[1], p[2] - a.p[2]])) }
+  })
+  const lowest = (time) => {
+    let y = Infinity
+    for (const c of contacts) {
+      const a = fk(c.foot, time)
+      for (const l of c.pts) y = Math.min(y, a.p[1] + rotate(a.q, l)[1])
+    }
+    return y
+  }
+  const offsets = []
+  for (let time = 0; time <= duration; time += 1 / 30) offsets.push(floor - lowest(time))
+  offsets.sort((a, b) => a - b)
+  const dy = offsets[Math.floor(offsets.length / 2)] ?? 0
+  for (const ch of clip.listChannels()) {
+    if (ch.getTargetNode() !== hips || ch.getTargetPath() !== 'translation') continue
+    const acc = ch.getSampler().getOutput()
+    const arr = acc.getArray().slice()
+    for (let i = 1; i < arr.length; i += 3) arr[i] += dy
+    acc.setArray(arr)
+  }
+  return { dy, restGap: lowest(null) - floor, lo: offsets[0], hi: offsets[offsets.length - 1] }
+}
+for (const a of root.listAnimations()) {
+  const g = groundClip(doc, a)
+  console.log(`grounded ${a.getName()}: hips ${g.dy >= 0 ? '+' : ''}${g.dy.toFixed(2)} (per-frame offsets ${g.lo?.toFixed(2)}..${g.hi?.toFixed(2)}, rest gap ${g.restGap?.toFixed(3)})`)
+}
+
+if ('mirror-talk' in flags) {
+  const talk = root.listAnimations().find((a) => a.getName() === 'talk')
+  if (talk) console.log(`talk2: ${mirrorClip(doc, talk, 'talk2').listChannels().length} mirrored channels`)
+}
+
 // Material normalisation. The generator exports metallic=1 with the colour map
 // wired to emission, which renders as lit chrome; people are dielectric.
 const png = async (path) => ({ data: await sharp(readFileSync(path)).png().toBuffer(), mime: 'image/png' })
@@ -95,7 +236,8 @@ for (const mat of root.listMaterials()) {
     const data = await sharp(rgb, { raw: { width, height, channels: 3 } }).png().toBuffer()
     const tex = doc.createTexture('roughness').setImage(data).setMimeType('image/png')
     mat.setMetallicRoughnessTexture(tex).setRoughnessFactor(1)
-  } else if (!mat.getMetallicRoughnessTexture()) {
+  } else if (isTarget && !mat.getMetallicRoughnessTexture()) {
+    // Other materials (the shoes) keep the roughness they were exported with.
     mat.setRoughnessFactor(Number(flags['rough-factor'] ?? 0.62))
   }
   if (flags.orm && isTarget) {
@@ -108,6 +250,11 @@ for (const mat of root.listMaterials()) {
     const { data, mime } = await png(flags.normal)
     const tex = doc.createTexture('normal').setImage(data).setMimeType(mime)
     mat.setNormalTexture(tex).setNormalScale(Number(flags['normal-scale'] ?? 0.6))
+  }
+  if (flags['pump-color'] && /pump/i.test(mat.getName())) {
+    // The shoes carry a plain colour, given as linear r,g,b so it can be tuned without a re-export.
+    const [r, g, b] = String(flags['pump-color']).split(',').map(Number)
+    mat.setBaseColorFactor([r, g, b, 1])
   }
   console.log(`material ${mat.getName()}: metallic ${mat.getMetallicFactor()} roughness ${mat.getRoughnessFactor()} emissive ${mat.getEmissiveFactor()}`)
 }

@@ -33,15 +33,23 @@ async function shoot(name, width, height, opts = {}) {
     await page.waitForTimeout(900)
   }
   if (opts.scrollTo !== undefined) { await page.evaluate((y) => { document.documentElement.style.scrollBehavior = 'auto'; window.scrollTo(0, y) }, opts.scrollTo); await page.waitForTimeout(1500) }
-  await page.screenshot({ path: `${out}/${name}.png`, fullPage: opts.full ?? false })
+  if (opts.el) {
+    const loc = page.locator(opts.el)
+    await loc.scrollIntoViewIfNeeded()
+    await page.waitForTimeout(1800)
+    await loc.screenshot({ path: `${out}/${name}.png` })
+  } else await page.screenshot({ path: `${out}/${name}.png`, fullPage: opts.full ?? false })
   const info = await page.evaluate(() => ({ title: document.title, h: document.documentElement.scrollHeight, w: document.documentElement.scrollWidth, intro: !!document.querySelector('.intro'), globe: !!document.querySelector('.globe canvas'), cards: document.querySelectorAll('.idx').length }))
   console.log(name, JSON.stringify(info))
   await ctx.close()
 }
 await shoot('intro-first-visit', 1440, 900, { wait: 3500 })
+await shoot('intro-talk', 1440, 900, { wait: 16000 })
+await shoot('intro-talk-mobile', 390, 844, { wait: 16000 })
 await shoot('desktop-hero', 1440, 900, { seen: true })
 await shoot('desktop-full', 1440, 900, { seen: true, full: true, wait: 3000 })
-await shoot('desktop-explainer', 1440, 900, { seen: true, scrollTo: 1600 })
+await shoot('desktop-explainer', 1440, 900, { seen: true, el: '#what' })
+await shoot('mobile-explainer', 390, 844, { seen: true, el: '#what' })
 await shoot('mobile-hero', 390, 844, { seen: true })
 await shoot('mobile-full', 390, 844, { seen: true, full: true, wait: 3000 })
 await browser.close()
