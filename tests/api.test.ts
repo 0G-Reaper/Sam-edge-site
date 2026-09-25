@@ -206,6 +206,9 @@ describe('pages and headers', () => {
     expect(res.headers.get('x-frame-options')).toBe('DENY')
     expect(res.headers.get('x-content-type-options')).toBe('nosniff')
     expect(res.headers.get('cross-origin-opener-policy')).toBe('same-origin')
+    const permissions = res.headers.get('permissions-policy') ?? ''
+    expect(permissions).toContain('browsing-topics=()')
+    expect(permissions).toContain('join-ad-interest-group=()')
   })
 
   it('answers unknown API paths with 404 and unknown pages with the shell', async () => {
