@@ -161,15 +161,13 @@ describe('pages and headers', () => {
     expect((await app.request('/healthz', { headers: { host: 'healthcheck.internal' } })).status).toBe(200)
   })
 
-  it('redirects plain-HTTP requests to the canonical host itself up to HTTPS in production', async () => {
+  it('upgrades a request a proxy reports as plain HTTP, and never redirects when the header is absent', async () => {
     const app = build(openDb(':memory:'), { canonicalHost: 'sam.example', production: true })
-    const insecure = await app.request('/how?x=1', { headers: { host: 'sam.example' } })
-    expect(insecure.status).toBe(301)
-    expect(insecure.headers.get('location')).toBe('https://sam.example/how?x=1')
-    const stillHttp = await app.request('/', { headers: { host: 'sam.example', 'x-forwarded-proto': 'http' } })
-    expect(stillHttp.status).toBe(301)
-    const secure = await app.request('/', { headers: { host: 'sam.example', 'x-forwarded-proto': 'https' } })
-    expect(secure.status).toBe(200)
+    const plain = await app.request('/how?x=1', { headers: { host: 'sam.example', 'x-forwarded-proto': 'http' } })
+    expect(plain.status).toBe(301)
+    expect(plain.headers.get('location')).toBe('https://sam.example/how?x=1')
+    expect((await app.request('/', { headers: { host: 'sam.example', 'x-forwarded-proto': 'https' } })).status).toBe(200)
+    expect((await app.request('/', { headers: { host: 'sam.example' } })).status).toBe(200)
   })
 
   it('publishes security.txt only when a contact is configured', async () => {

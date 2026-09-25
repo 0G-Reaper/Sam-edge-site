@@ -23,7 +23,7 @@ For live-reload development run `npm run dev:server` in one terminal and `npm ru
 | `ADMIN_TOKEN` | Bearer token for the CSV export. Unset means the export does not exist. |
 | `SITE_INSTAGRAM_URL` | Instagram profile link shown in the footer |
 | `SITE_DISCORD_URL` | Discord invite shown in the footer (empty shows "opening soon") |
-| `CANONICAL_HOST` | Public hostname (e.g. `aimetrading.com`). **Required in production** — without it, no request is redirected to HTTPS or to the canonical host, so `www` and plain-HTTP visitors are served insecurely instead of being sent to `https://<CANONICAL_HOST>`. |
+| `CANONICAL_HOST` | Public hostname (e.g. `aimetrading.com`). Set it in production: every other hostname (the `www` form, the `*.up.railway.app` domain) is 301-redirected to `https://<CANONICAL_HOST>`. Plain HTTP is upgraded to HTTPS by Railway's edge either way. |
 | `SECURITY_CONTACT` | `mailto:` or `https:` URI published at `/.well-known/security.txt`. Optional. |
 
 ## Exporting the waitlist
