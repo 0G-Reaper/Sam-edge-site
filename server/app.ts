@@ -93,13 +93,17 @@ export function createApp(opts: AppOptions) {
 
   app.get('/healthz', (c) => c.text('ok'))
 
-  // One public origin: the www form, the platform's own domain and any forged Host header are all
-  // sent to the canonical host, so links, the canonical tag and HSTS agree on a single origin.
+  // One public origin over HTTPS: the www form, the platform's own domain, any forged Host header,
+  // and a plain-HTTP request to the canonical host itself are all sent to https://<canonical>, so
+  // links, the canonical tag and HSTS agree on a single secure origin.
   if (opts.canonicalHost) {
     const canonical = opts.canonicalHost.toLowerCase()
     app.use('*', async (c, next) => {
+      if (c.req.path === '/healthz') return next()
       const host = (c.req.header('host') ?? '').toLowerCase().replace(/:\d+$/, '')
-      if (host === canonical || c.req.path === '/healthz') return next()
+      const forwardedProto = (c.req.header('x-forwarded-proto') ?? '').split(',')[0]!.trim()
+      const isSecure = !opts.production || forwardedProto === 'https'
+      if (host === canonical && isSecure) return next()
       const url = new URL(c.req.url)
       return c.redirect(`https://${canonical}${url.pathname}${url.search}`, 301)
     })
