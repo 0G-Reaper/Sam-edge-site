@@ -18,7 +18,7 @@ const db = openDb(dbPath)
 const app = createApp({
   db,
   markets: () => getMarkets(),
-  adminToken: process.env.ADMIN_TOKEN || undefined,
+  adminToken: strongToken(process.env.ADMIN_TOKEN),
   site: {
     instagram: cleanUrl(process.env.SITE_INSTAGRAM_URL),
     discord: cleanUrl(process.env.SITE_DISCORD_URL),
@@ -33,6 +33,13 @@ const app = createApp({
 const server = serve({ fetch: app.fetch, port, hostname: '0.0.0.0' }, (info) => {
   console.log(`sam-edge-site listening on :${info.port} (${production ? 'production' : 'development'})`)
 })
+
+function strongToken(value: string | undefined): string | undefined {
+  if (!value) return undefined
+  if (value.length >= 32) return value
+  console.error('security: ADMIN_TOKEN is shorter than 32 characters, so the admin export is disabled. Generate one with: openssl rand -hex 32')
+  return undefined
+}
 
 function cleanUrl(value: string | undefined): string | undefined {
   if (!value) return undefined

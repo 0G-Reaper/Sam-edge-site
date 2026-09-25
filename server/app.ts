@@ -10,6 +10,7 @@ import { addSignup, allSignups, countSignups } from './db.js'
 import { memberKey } from './keys.js'
 import type { MarketsPayload } from './markets.js'
 import { RateLimiter } from './ratelimit.js'
+import { BanList, isProbe, logSecurityEvent, type SecurityLog } from './security.js'
 
 export interface SiteConfig {
   instagram?: string
@@ -29,9 +30,12 @@ export interface AppOptions {
   canonicalHost?: string
   /** A mailto: or https: URI published at /.well-known/security.txt (RFC 9116). */
   securityContact?: string
+  /** Receives probes, bans and failed admin logins; defaults to a JSON line on stderr. */
+  onSecurityEvent?: SecurityLog
   now?: () => number
 }
 
+const BAN_MS = 24 * 60 * 60_000
 const MIN_FORM_MS = 2_500
 const MAX_FORM_MS = 24 * 60 * 60_000
 
@@ -56,6 +60,9 @@ export function createApp(opts: AppOptions) {
   const apiLimiter = new RateLimiter(120, 60_000)
   const signupLimiter = new RateLimiter(5, 10 * 60_000)
   const adminLimiter = new RateLimiter(20, 60_000)
+  const adminFailures = new RateLimiter(5, 60 * 60_000)
+  const bans = new BanList(BAN_MS)
+  const security = opts.onSecurityEvent ?? logSecurityEvent
 
   app.use(
     '*',
@@ -91,6 +98,17 @@ export function createApp(opts: AppOptions) {
     }),
   )
 
+  // A scanner probing for secrets gets the same 404 as any missing file, and is shut out of the API.
+  app.use('*', async (c, next) => {
+    if (!isProbe(c.req.path)) return next()
+    const ip = clientIp(c)
+    if (!bans.has(ip, now())) {
+      bans.add(ip, now())
+      security('probe', { ip, path: c.req.path.slice(0, 200) })
+    }
+    return c.text('Not found', 404)
+  })
+
   app.get('/healthz', (c) => c.text('ok'))
 
   // One public origin over HTTPS: the www form, the platform's own domain, any forged Host header,
@@ -120,7 +138,9 @@ export function createApp(opts: AppOptions) {
 
   app.use('/api/*', async (c, next) => {
     c.header('Cache-Control', 'no-store')
-    const rl = apiLimiter.check(clientIp(c), now())
+    const ip = clientIp(c)
+    if (bans.has(ip, now())) return notFound(c)
+    const rl = apiLimiter.check(ip, now())
     if (!rl.ok) return tooMany(c, rl.retryAfter)
     await next()
   })
@@ -166,9 +186,20 @@ export function createApp(opts: AppOptions) {
     }
   })
 
+  const adminAllowed = (c: Context): boolean => {
+    const ip = clientIp(c)
+    if (!adminLimiter.check(ip, now()).ok) return false
+    if (authed(c, opts.adminToken)) return true
+    security('admin_auth_failed', { ip })
+    if (!adminFailures.check(ip, now()).ok) {
+      bans.add(ip, now())
+      security('ban', { ip, reason: 'admin_auth' })
+    }
+    return false
+  }
+
   app.get('/api/admin/export.csv', (c) => {
-    const rl = adminLimiter.check(clientIp(c), now())
-    if (!rl.ok || !authed(c, opts.adminToken)) return notFound(c)
+    if (!adminAllowed(c)) return notFound(c)
     const rows = allSignups(opts.db)
     const csv = toCsv(
       ['user_id', 'email', 'member_key', 'joined_at'],
@@ -180,8 +211,7 @@ export function createApp(opts: AppOptions) {
   })
 
   app.get('/api/admin/stats', (c) => {
-    const rl = adminLimiter.check(clientIp(c), now())
-    if (!rl.ok || !authed(c, opts.adminToken)) return notFound(c)
+    if (!adminAllowed(c)) return notFound(c)
     return c.json({ ok: true, signups: countSignups(opts.db) })
   })
 
