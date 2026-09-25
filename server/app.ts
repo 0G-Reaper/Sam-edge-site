@@ -87,6 +87,10 @@ export function createApp(opts: AppOptions) {
         geolocation: [],
         payment: [],
         usb: [],
+        // Opt out of Chrome's cross-site ad-tracking APIs: nothing on this site uses them,
+        // and without this a visitor's browsing here is otherwise eligible for both by default.
+        browsingTopics: [],
+        joinAdInterestGroup: [],
       },
     }),
   )
