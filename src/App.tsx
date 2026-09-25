@@ -13,11 +13,11 @@ import { canPlayIntro, hasSeenIntro } from './lib/intro'
 const SamIntro = lazy(() => import('./components/SamIntro'))
 
 export default function App() {
-  const [intro, setIntro] = useState<boolean>(() => canPlayIntro() && !hasSeenIntro())
+  const [intro, setIntro] = useState<'welcome' | 'replay' | null>(() => canPlayIntro() && !hasSeenIntro() ? 'welcome' : null)
   const meetSam = useCallback(() => {
-    if (canPlayIntro()) setIntro(true)
-    else document.getElementById('what')?.scrollIntoView({ behavior: 'smooth' })
+    setIntro('replay')
   }, [])
+  const closeIntro = useCallback(() => setIntro(null), [])
 
   return (
     <>
@@ -39,7 +39,7 @@ export default function App() {
       <Effects />
       {intro && (
         <Suspense fallback={null}>
-          <SamIntro onDone={() => setIntro(false)} />
+          <SamIntro startWithSound={intro === 'replay'} onDone={closeIntro} />
         </Suspense>
       )}
     </>

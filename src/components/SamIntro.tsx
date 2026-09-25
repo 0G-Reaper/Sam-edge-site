@@ -1,471 +1,122 @@
-import { Component, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Canvas, useFrame, useThree } from '@react-three/fiber'
-import { ContactShadows, useAnimations, useGLTF, useProgress } from '@react-three/drei'
-import { AnimatePresence, motion } from 'motion/react'
-import * as THREE from 'three'
-import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
-import { SCRIPT, markIntroSeen } from '../lib/intro'
-import { Logo, Mute, Sound } from './Icons'
-import modelUrl from '../assets/sam.glb?url'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { markIntroSeen } from '../lib/intro'
+import { Logo, Mute, Play, Sound } from './Icons'
+import welcomeVideo from '../assets/intro/sam-welcome.mp4'
+import welcomePoster from '../assets/intro/poster.jpg'
 
-// Assets go through the bundler so every deploy gets a new, content-hashed URL; a fixed path
-// under a long cache lifetime left phones showing an old avatar for weeks.
-const MODEL_URL = modelUrl
-const AUDIO = import.meta.glob('../assets/audio/*.mp3', { eager: true, query: '?url', import: 'default' }) as Record<string, string>
-const audioUrl = (i: number) => AUDIO[`../assets/audio/sam-${i}.mp3`] ?? ''
-
-const START_X = 3.4
-const END_X = 0.05
-const EXIT_X = -3.9
-const SPEED = 1.05
-const FACE_LEFT = -Math.PI / 2
-const FACE_CAMERA = 0
-
-type Phase = 'loading' | 'enter' | 'talk' | 'exit' | 'done'
-
-class Boundary extends Component<{ onError: () => void; children: ReactNode }, { failed: boolean }> {
-  state = { failed: false }
-  static getDerivedStateFromError() {
-    return { failed: true }
-  }
-  componentDidCatch() {
-    this.props.onError()
-  }
-  render() {
-    return this.state.failed ? null : this.props.children
-  }
-}
-
-function Env() {
-  const { gl, scene } = useThree()
-  useEffect(() => {
-    const pmrem = new THREE.PMREMGenerator(gl)
-    const tex = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
-    scene.environment = tex
-    scene.environmentIntensity = 0.75
-    return () => {
-      scene.environment = null
-      tex.dispose()
-      pmrem.dispose()
-    }
-  }, [gl, scene])
-  return null
-}
-
-// Two framings: a wide shot for the walk-in and walk-off, and a medium shot while she speaks
-// so her face carries the introduction. Portrait phones keep a little more distance.
-const SHOT_WIDE = { pos: [0, 1.2, 4.8], look: [0, 0.95, 0] } as const
-const SHOT_TALK = { pos: [0.1, 1.36, 2.7], look: [0.02, 1.22, 0] } as const
-
-function CameraRig({ phase }: { phase: Phase }) {
-  const { camera, size } = useThree()
-  const look = useRef(new THREE.Vector3(SHOT_WIDE.look[0], SHOT_WIDE.look[1], SHOT_WIDE.look[2]))
-  useFrame((state, dt) => {
-    const d = Math.min(dt, 0.1)
-    const talk = phase === 'talk'
-    const shot = talk ? SHOT_TALK : SHOT_WIDE
-    const zoomOut = size.height > size.width ? 1.22 : 1
-    const k = talk ? 1.6 : 2.4
-    camera.position.x = THREE.MathUtils.damp(camera.position.x, shot.pos[0], k, d)
-    camera.position.y = THREE.MathUtils.damp(camera.position.y, shot.pos[1], k, d)
-    camera.position.z = THREE.MathUtils.damp(camera.position.z, shot.pos[2] * zoomOut, k, d)
-    look.current.x = THREE.MathUtils.damp(look.current.x, shot.look[0], k, d)
-    look.current.y = THREE.MathUtils.damp(look.current.y, shot.look[1], k, d)
-    look.current.z = THREE.MathUtils.damp(look.current.z, shot.look[2], k, d)
-    const t = state.clock.elapsedTime
-    const sway = talk ? 0.012 : 0
-    camera.lookAt(look.current.x + Math.sin(t * 0.7) * sway, look.current.y + Math.sin(t * 0.9 + 1) * sway * 0.6, look.current.z)
-  })
-  return null
-}
-
-function Loaded({ onReady }: { onReady: () => void }) {
-  useEffect(() => {
-    onReady()
-  }, [onReady])
-  return null
-}
-
-const FADE = 0.55
-const SPEEDS = [0.84, 0.93, 1.0, 1.08]
-
-// One spoken gesture: which clip, how fast, and where in the clip it starts. The next gesture never
-// reuses the previous clip or the previous speed, so the talking never settles into a visible loop.
-function nextGesture(prev: { clip: string; speed: number } | null, names: string[]) {
-  const pool = names.length > 1 && prev ? names.filter((n) => n !== prev.clip) : names
-  const clip = pool[Math.floor(Math.random() * pool.length)] ?? names[0]!
-  const speeds = prev ? SPEEDS.filter((s) => s !== prev.speed) : SPEEDS
-  const speed = speeds[Math.floor(Math.random() * speeds.length)] ?? 1
-  return { clip, speed, from: Math.random() * 0.18 }
-}
-
-// A small rotation layered over whatever the animation mixer wrote to a bone this frame. The mixer
-// only rewrites a bone when its value changes, so the previous overlay is recognised (exact match)
-// and rebased rather than compounded frame after frame.
-class Overlay {
-  private base = new THREE.Quaternion()
-  private last = new THREE.Quaternion()
-  private offset = new THREE.Quaternion()
-  private euler = new THREE.Euler()
-  private fresh = true
-  apply(bone: THREE.Object3D, x: number, y: number, z: number) {
-    if (this.fresh || !bone.quaternion.equals(this.last)) this.base.copy(bone.quaternion)
-    this.fresh = false
-    this.euler.set(x, y, z)
-    this.offset.setFromEuler(this.euler)
-    bone.quaternion.copy(this.base).multiply(this.offset)
-    this.last.copy(bone.quaternion)
-  }
-}
-
-function Sam({ phase, beat, onArrived, onExited }: { phase: Phase; beat: number; onArrived: () => void; onExited: () => void }) {
-  const group = useRef<THREE.Group>(null)
-  const walk = useGLTF(MODEL_URL, false, true)
-  const clips = useMemo(() => {
-    const all = walk.animations
-    const byName = (n: string) => all.find((c) => c.name === n)
-    const out: THREE.AnimationClip[] = []
-    const w = byName('walk') ?? all[0]
-    if (w) {
-      const c = w.clone()
-      c.name = 'walk'
-      out.push(c)
-    }
-    // Two talking clips: the gesture as animated and its mirror image, so either hand can lead.
-    for (const name of ['talk', 'talk2']) {
-      const t = byName(name) ?? (name === 'talk' ? all[1] : undefined)
-      if (t) {
-        const c = t.clone()
-        c.name = name
-        out.push(c)
-      }
-    }
-    return out
-  }, [walk.animations])
-  const { actions } = useAnimations(clips, group)
-  const model = useMemo(() => {
-    const s = walk.scene
-    const box = new THREE.Box3().setFromObject(s)
-    const size = box.getSize(new THREE.Vector3())
-    const k = size.y > 0 ? 1.72 / size.y : 1
-    s.scale.setScalar(k)
-    box.setFromObject(s)
-    const c = box.getCenter(new THREE.Vector3())
-    s.position.set(-c.x, -box.min.y, -c.z)
-    s.traverse((o) => {
-      const m = o as THREE.Mesh
-      if (m.isMesh) {
-        m.castShadow = true
-        m.receiveShadow = true
-        m.frustumCulled = false
-        const mat = m.material as THREE.MeshStandardMaterial
-        if (mat && 'roughness' in mat) {
-          mat.envMapIntensity = 0.9
-          if (mat.emissive) mat.emissive.setScalar(0)
-          mat.needsUpdate = true
-        }
-      }
-    })
-    return s
-  }, [walk.scene])
-  const bones = useMemo(
-    () => ({ head: model.getObjectByName('Head'), spine: model.getObjectByName('Spine1') ?? model.getObjectByName('Spine') }),
-    [model],
-  )
-  const overlays = useRef({ head: new Overlay(), spine: new Overlay() })
-  const gesture = useRef<{ action: THREE.AnimationAction; clip: string; speed: number } | null>(null)
-  const gestureCount = useRef(0)
-  const nodAt = useRef(-10)
-  const lastBeat = useRef(-1)
-  const arrived = useRef(false)
-  const exited = useRef(false)
-  const phaseStart = useRef<number | null>(null)
-  const lastPhase = useRef<Phase>('loading')
-
-  useEffect(() => {
-    const a = actions as Record<string, THREE.AnimationAction | null>
-    const w = a.walk ?? null
-    if (phase === 'enter' || phase === 'exit') {
-      gesture.current?.action.fadeOut(0.35)
-      gesture.current = null
-      if (w) {
-        w.paused = false
-        w.reset().fadeIn(0.35).play()
-      }
-    } else if (phase === 'talk') {
-      if (a.talk) w?.fadeOut(0.45)
-      else if (w) w.paused = true
-    }
-  }, [phase, actions])
-
-  // Motion is driven by wall-clock time, so the walk takes the same seconds on a slow phone as on a desktop.
-  useFrame((state, dt) => {
-    const g = group.current
-    if (!g) return
-    const now = state.clock.elapsedTime
-    if (lastPhase.current !== phase) {
-      lastPhase.current = phase
-      phaseStart.current = now
-    }
-    const t = now - (phaseStart.current ?? now)
-    const d = Math.min(dt, 0.1)
-    if (phase === 'enter') {
-      g.position.x = Math.max(END_X, START_X - SPEED * t)
-      if (g.position.x <= END_X && !arrived.current) {
-        arrived.current = true
-        onArrived()
-      }
-    } else if (phase === 'talk') {
-      // Face the camera, with a slow shift of weight so she is never statue-still.
-      g.rotation.y = THREE.MathUtils.damp(g.rotation.y, FACE_CAMERA + Math.sin(now * 0.31) * 0.03, 5, d)
-      // Gestures: crossfade into the next one shortly before the current one ends.
-      const a = actions as Record<string, THREE.AnimationAction | null>
-      const names = ['talk', 'talk2'].filter((n) => a[n])
-      const cur = gesture.current
-      const left = cur ? (cur.action.getClip().duration - cur.action.time) / Math.max(0.05, cur.action.timeScale) : 0
-      if (names.length && (!cur || left < FADE || !cur.action.isRunning())) {
-        const next = nextGesture(cur, names)
-        const act = a[next.clip]!
-        if (cur && cur.action !== act) cur.action.fadeOut(FADE)
-        act.reset()
-        act.setLoop(THREE.LoopOnce, 1)
-        act.clampWhenFinished = true
-        act.timeScale = next.speed
-        act.time = next.from * act.getClip().duration
-        act.fadeIn(FADE).play()
-        gesture.current = { action: act, clip: next.clip, speed: next.speed }
-        // Exposed for the smoke test, which checks that no two consecutive gestures share a clip or speed.
-        document.documentElement.dataset.samGesture = `${next.clip}@${next.speed}#${++gestureCount.current}`
-      }
-      // A head beat as each new line starts, over a slow drift; the torso turns a little with it.
-      if (beat !== lastBeat.current) {
-        lastBeat.current = beat
-        nodAt.current = now
-      }
-      const u = (now - nodAt.current) / 0.7
-      const nod = u >= 0 && u < 1 ? Math.sin(Math.PI * u) * 0.06 : 0
-      if (bones.head) overlays.current.head.apply(bones.head, nod + Math.sin(now * 0.8) * 0.012, Math.sin(now * 0.45 + 1) * 0.025, 0)
-      if (bones.spine) overlays.current.spine.apply(bones.spine, Math.sin(now * 0.5) * 0.008, Math.sin(now * 0.27) * 0.035, 0)
-    } else if (phase === 'exit') {
-      const turn = Math.min(1, t / 0.5)
-      g.rotation.y = FACE_CAMERA + (FACE_LEFT - FACE_CAMERA) * (turn * turn * (3 - 2 * turn))
-      if (t > 0.35) g.position.x = END_X - SPEED * (t - 0.35)
-      if (g.position.x < EXIT_X && !exited.current) {
-        exited.current = true
-        onExited()
-      }
-    }
-  })
-
-  return (
-    <group ref={group} position={[START_X, 0, 0]} rotation={[0, FACE_LEFT, 0]}>
-      <primitive object={model} />
-    </group>
-  )
-}
-
-export default function SamIntro({ onDone }: { onDone: () => void }) {
-  const [phase, setPhase] = useState<Phase>('loading')
-  const [line, setLine] = useState(-1)
-  const [sound, setSound] = useState(false)
-  const [audioOk, setAudioOk] = useState(false)
-  const [closing, setClosing] = useState(false)
-  const { progress } = useProgress()
-  const audios = useRef<Map<number, HTMLAudioElement>>(new Map())
-  const lineStart = useRef(0)
+export default function SamIntro({ onDone, startWithSound = false }: { onDone: () => void; startWithSound?: boolean }) {
+  const dialogRef = useRef<HTMLDialogElement>(null)
+  const videoRef = useRef<HTMLVideoElement>(null)
   const finished = useRef(false)
-
-  const audioFor = useCallback((i: number) => {
-    let a = audios.current.get(i)
-    if (!a) {
-      a = new Audio(audioUrl(i))
-      a.preload = 'auto'
-      audios.current.set(i, a)
-    }
-    return a
-  }, [])
-
-  const stopAudio = useCallback(() => {
-    audios.current.forEach((a) => a.pause())
-  }, [])
+  const [sound, setSound] = useState(startWithSound)
+  const [needsPlay, setNeedsPlay] = useState(false)
+  const [failed, setFailed] = useState(false)
 
   const finish = useCallback(() => {
     if (finished.current) return
     finished.current = true
+    videoRef.current?.pause()
     markIntroSeen()
-    stopAudio()
-    setClosing(true)
-    setPhase('done')
-    window.setTimeout(onDone, 700)
-  }, [onDone, stopAudio])
+    dialogRef.current?.close()
+    onDone()
+  }, [onDone])
 
   useEffect(() => {
+    const dialog = dialogRef.current
+    const video = videoRef.current
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
     document.documentElement.classList.add('intro-open')
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') finish()
+    // The native modal contains keyboard focus and makes the background inert.
+    dialog?.showModal()
+    if (video) {
+      video.muted = !startWithSound
+      void video.play().catch(() => {
+        if (!finished.current) setNeedsPlay(true)
+      })
     }
-    window.addEventListener('keydown', onKey)
-    const probe = new Audio(audioUrl(0))
-    probe.preload = 'metadata'
-    probe.addEventListener('loadedmetadata', () => setAudioOk(true), { once: true })
-    probe.addEventListener('error', () => setAudioOk(false), { once: true })
-    audios.current.set(0, probe)
-    const all = audios.current
     return () => {
+      video?.pause()
+      dialog?.close()
       document.documentElement.classList.remove('intro-open')
-      window.removeEventListener('keydown', onKey)
-      all.forEach((a) => a.pause())
+      previousFocus?.focus({ preventScroll: true })
     }
-  }, [finish])
+  }, [startWithSound])
 
-  // Caption timeline while SAM talks.
-  useEffect(() => {
-    if (phase !== 'talk') return
-    setLine(0)
-    lineStart.current = Date.now()
-    const timers: number[] = []
-    let acc = 0
-    SCRIPT.forEach((l, i) => {
-      acc += l.ms
-      const next = i + 1
-      timers.push(
-        window.setTimeout(() => {
-          if (next < SCRIPT.length) {
-            lineStart.current = Date.now()
-            setLine(next)
-          } else {
-            setPhase('exit')
-          }
-        }, acc),
-      )
-    })
-    return () => timers.forEach((t) => window.clearTimeout(t))
-  }, [phase])
-
-  // Narration follows the captions when sound is on.
-  useEffect(() => {
-    if (!sound || !audioOk || phase !== 'talk' || line < 0) return
-    stopAudio()
-    const a = audioFor(line)
-    const offset = (Date.now() - lineStart.current) / 1000
-    try {
-      a.currentTime = offset > 0.4 ? offset : 0
-    } catch {
-      /* not seekable yet */
-    }
-    a.play().catch(() => setSound(false))
-    if (line + 1 < SCRIPT.length) audioFor(line + 1)
-  }, [sound, audioOk, phase, line, audioFor, stopAudio])
+  const play = () => {
+    const video = videoRef.current
+    if (!video) return
+    void video.play().catch(() => setNeedsPlay(true))
+  }
 
   const toggleSound = () => {
-    if (sound) {
-      stopAudio()
-      setSound(false)
-    } else {
+    const video = videoRef.current
+    if (!video) return
+    if (video.muted || video.volume === 0) {
+      // Hear the entire welcome instead of joining mid-sentence after muted autoplay.
+      video.currentTime = 0
+      video.muted = false
+      video.volume = 1
       setSound(true)
+      play()
+    } else {
+      video.muted = true
+      setSound(false)
     }
   }
 
-  const onReady = useCallback(() => setPhase((p) => (p === 'loading' ? 'enter' : p)), [])
-  const onArrived = useCallback(() => setPhase('talk'), [])
-  const onExited = useCallback(() => finish(), [finish])
-
   return (
-    <div className={`intro${closing ? ' intro--closing' : ''}`} role="dialog" aria-modal="true" aria-label="An introduction from SAM">
-      <div className="intro__stage">
-        <Boundary onError={finish}>
-          <Canvas
-            shadows="soft"
-            dpr={[1, 1.5]}
-            camera={{ position: [0, 1.2, 4.8], fov: 27 }}
-            gl={{ antialias: true, alpha: true, powerPreference: 'high-performance', toneMapping: THREE.AgXToneMapping, toneMappingExposure: 1.05 }}
-            onCreated={({ camera }) => camera.lookAt(0, 0.95, 0)}
-          >
-            <Env />
-            <CameraRig phase={phase} />
-            <hemisphereLight args={['#dfe9ff', '#0a1220', 0.9]} />
-            <directionalLight
-              position={[2.2, 4.2, 3.2]}
-              intensity={2.6}
-              color="#fff1e0"
-              castShadow
-              shadow-mapSize={[2048, 2048]}
-              shadow-bias={-0.0002}
-              shadow-normalBias={0.02}
-            />
-            <directionalLight position={[-2.6, 2.4, 3]} intensity={0.8} color="#cfe3ff" />
-            <directionalLight position={[0.6, 2.2, 4.5]} intensity={0.55} color="#ffe9d6" />
-            <directionalLight position={[-3, 2.5, -2]} intensity={1.2} color="#4fd8c7" />
-            <directionalLight position={[3, 1.5, -3]} intensity={0.6} color="#8b7cff" />
-            <Suspense fallback={null}>
-              <Sam phase={phase} beat={line} onArrived={onArrived} onExited={onExited} />
-              <Loaded onReady={onReady} />
-            </Suspense>
-            <ContactShadows position={[0, 0.001, 0]} opacity={0.6} scale={7} blur={2.2} far={2.4} />
-            <mesh rotation-x={-Math.PI / 2} position={[0, 0.0005, 0]}>
-              <ringGeometry args={[1.32, 1.35, 96]} />
-              <meshBasicMaterial color="#3fd8c7" transparent opacity={0.35} />
-            </mesh>
-          </Canvas>
-        </Boundary>
-      </div>
-      <div className="intro__ui">
+    <dialog
+      ref={dialogRef}
+      className="intro"
+      aria-label="An introduction from SAM"
+      onCancel={(event) => { event.preventDefault(); finish() }}
+    >
+      <div className="intro__content">
         <div className="intro__top">
           <div className="brand">
             <Logo />
             <span className="brand__name">SAM</span>
-            <span className="brand__tag">Live intro</span>
+            <span className="brand__tag">Welcome</span>
           </div>
-          <div className="intro__actions">
-            {audioOk && (
-              <button type="button" className="btn btn--ghost btn--sm" onClick={toggleSound} aria-pressed={sound}>
-                {sound ? <Mute /> : <Sound />}
-                {sound ? 'Mute' : 'Hear SAM'}
-              </button>
-            )}
-            <button type="button" className="btn btn--ghost btn--sm" onClick={finish}>
-              Skip intro
-            </button>
-          </div>
+          <button type="button" className="btn btn--ghost btn--sm" onClick={finish} autoFocus>
+            {startWithSound ? 'Close video' : 'Skip intro'}
+          </button>
         </div>
-        {phase === 'loading' && (
-          <div className="intro__loading" aria-live="polite">
-            <div className="intro__bar">
-              <i style={{ width: `${Math.max(4, Math.min(100, progress))}%` }} />
-            </div>
-            <span>Preparing SAM · {Math.round(progress)}%</span>
-          </div>
-        )}
-        <div className="intro__caption" aria-live="polite">
-          <AnimatePresence mode="wait">
-            {phase === 'talk' && line >= 0 && (
-              <motion.p
-                key={line}
-                initial={{ opacity: 0, y: 14, filter: 'blur(6px)' }}
-                animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
-                exit={{ opacity: 0, y: -10, filter: 'blur(6px)' }}
-                transition={{ duration: 0.45 }}
-              >
-                {SCRIPT[line]!.text}
-              </motion.p>
-            )}
-            {phase === 'enter' && (
-              <motion.span key="enter" className="intro__hint" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-                SAM is on her way
-              </motion.span>
-            )}
-          </AnimatePresence>
-          {phase === 'talk' && (
-            <div className="intro__dots" aria-hidden="true">
-              {SCRIPT.map((_, i) => (
-                <i key={i} className={i <= line ? 'is-on' : ''} />
-              ))}
-            </div>
+        <div className="intro__player">
+          <video
+            ref={videoRef}
+            src={welcomeVideo}
+            poster={welcomePoster}
+            aria-label="SAM welcome video"
+            controls
+            playsInline
+            muted={!sound}
+            preload="auto"
+            onPlay={() => setNeedsPlay(false)}
+            onEnded={finish}
+            onError={() => setFailed(true)}
+            onVolumeChange={(event) => setSound(!event.currentTarget.muted && event.currentTarget.volume > 0)}
+          >
+            Your browser does not support video. <a href={welcomeVideo}>Open SAM’s introduction</a>.
+          </video>
+          {needsPlay && !failed && (
+            <button type="button" className="btn btn--primary intro__play" onClick={play}>
+              <Play /> Play introduction
+            </button>
           )}
         </div>
+        <div className="intro__bottom">
+          {failed ? (
+            <p role="alert">The video could not load. <a href={welcomeVideo}>Open the video directly</a> or continue to the site.</p>
+          ) : (
+            <button type="button" className="btn btn--ghost btn--sm" onClick={toggleSound} aria-pressed={sound}>
+              {sound ? <Mute /> : <Sound />}
+              {sound ? 'Mute' : 'Hear SAM from the start'}
+            </button>
+          )}
+          <button type="button" className="intro__continue" onClick={finish}>Explore the site →</button>
+        </div>
       </div>
-    </div>
+    </dialog>
   )
 }
-
-useGLTF.preload(MODEL_URL, false, true)
