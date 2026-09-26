@@ -70,6 +70,34 @@ function modelReceipt(task: any) {
 }
 
 describe('durable member research', () => {
+  it('keeps a content-free erasure job for claimed research and rejects late point receipts', async () => {
+    const ctx = setup(), task = await intakeAndClaim(ctx)
+    deleteMemberResearch(ctx.db,1,ctx.time())
+    const rows = ctx.db.prepare('SELECT * FROM member_research_deletions').all()
+    expect(rows).toHaveLength(1); expect(JSON.stringify(rows)).not.toContain(input.claim)
+    expect((await ctx.worker('/api/internal/research/sam-receipt',evidence(ctx,task,'supported_effort'))).status).toBe(404)
+    expect(ctx.db.prepare('SELECT COUNT(*) n FROM test_awards').get()!.n).toBe(0)
+    expect((await ctx.worker('/api/internal/research/deletion-claim',{},'review')).status).toBe(401)
+    const first = (await (await ctx.worker('/api/internal/research/deletion-claim',{})).json() as any).items[0]
+    expect(first.submissionId).toBe(task.id); expect(first.memberId).toBeUndefined()
+    expect((await (await ctx.worker('/api/internal/research/deletion-claim',{})).json() as any).items).toEqual([])
+    ctx.advance(301_000)
+    const second = (await (await ctx.worker('/api/internal/research/deletion-claim',{})).json() as any).items[0]
+    const receipt = {...first,scope:'samv2-model-records-v1'}; delete receipt.leaseExpiresAt
+    expect((await ctx.worker('/api/internal/research/deletion-receipt',receipt)).status).toBe(409)
+    receipt.leaseToken=second.leaseToken
+    expect((await ctx.worker('/api/internal/research/deletion-receipt',{...receipt,scope:'all-provider-logs'})).status).toBe(400)
+    expect((await ctx.worker('/api/internal/research/deletion-receipt',receipt)).status).toBe(200)
+    expect(await (await ctx.worker('/api/internal/research/deletion-receipt',receipt)).json()).toMatchObject({completed:true,idempotent:true})
+    expect(ctx.db.prepare('SELECT state FROM member_research_deletions').get()!.state).toBe('completed')
+  })
+
+  it('does not wait for external erasure when research was never leased', async () => {
+    const ctx=setup(); await ctx.member('/api/member/research',input)
+    deleteMemberResearch(ctx.db,1,ctx.time())
+    expect(ctx.db.prepare('SELECT COUNT(*) n FROM member_research_deletions').get()!.n).toBe(0)
+  })
+
   it('distinguishes earlier duplicates so later copies cannot disqualify the original', async () => {
     const ctx = setup()
     const first = await (await ctx.member('/api/member/research', input, 1)).json() as any

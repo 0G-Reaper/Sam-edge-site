@@ -47,6 +47,7 @@ Keep secrets in protected service variables. Never put them in chat, Git, client
 | `SAM_RESEARCH_ALLOWED_PROVIDERS` | Comma-separated deployed, tested evidence adapter identifiers. |
 | `SAM_REVIEW_ALLOWED_MODELS` | Comma-separated pinned reviewer identifiers actually deployed. |
 | `MEMBER_QUEST_DEADLINE` | Optional real ISO timestamp. Absent means no deadline scheduled. |
+| `MEMBER_BACKUP_KEY` | Protected base64 32-byte key for the administrative backup process; retain separately from ciphertext. |
 | `ADMIN_TOKEN` | Existing administrator bearer credential; never share with members or workers. |
 
 The web server drains the persistent email outbox and reconciles Discord revocations every 15 seconds with overlap prevention. It does not run a fictional AI reviewer when workers are absent. Accepted email means the provider accepted it; inbox delivery needs provider-event evidence. Retries reuse one idempotency key and stop before its validity window ends.
@@ -54,7 +55,7 @@ The web server drains the persistent email outbox and reconciles Discord revocat
 ## Activation sequence
 
 1. Finish review of this branch. Pass unit/integration tests and a production build. Run a real browser flow in a private staging environment using test accounts before enforcing access on the live domain.
-2. Take a consistent SQLite backup while preserving the existing volume. Record signup count; test restoring into an isolated database. Add encrypted off-volume backups with operator-owned retention and a tested restore procedure. A volume alone is not a backup.
+2. Take a consistent SQLite backup while preserving the existing volume. Record signup count; test restoring into an isolated database. Use the implemented encrypted snapshot/restore command in `MEMBER_BACKUP_RESTORE.md`, then connect off-volume storage with operator-owned retention and test downloading/restoring a real backup. A volume alone is not a backup.
 3. Configure the email sender through the provider's protected interface; verify domain authentication and one delivery to an operator-controlled mailbox. Confirm restart/retry behavior and that message bodies are erased after acceptance. Do not enable membership before this succeeds.
 4. Confirm owner recovery is operational. Test an existing member's stored email, then two browser registrations and third-registration rejection. Lost-browser recovery must revoke the old key before admitting a replacement.
 5. Merge/deploy the exact reviewed commit, preserving the SQLite path and volume. Activate `MEMBER_ACCESS_ENABLED` only after the email and recovery gates pass. Keep the legacy waitlist closed afterward, including during outages.
@@ -70,13 +71,15 @@ Do not apply environment-wide staged changes to make a single-service update. In
 
 UserID, email, invitation lineage, progress and research remain in persistent storage until a deliberate one-member deletion. Ephemeral authentication material expires independently. Deletion immediately disables sessions, revokes browser keys, cancels queued mail and authentication challenges, and removes research content. If Discord removal is unavailable, it stays explicitly pending and retries; do not claim external access has vanished.
 
-After Discord revocation, purge email/identity/credentials and retain anonymous issuance and lineage tombstones. Collectible supply does not refill. Remove corresponding personal data from exports and honor the documented backup retention policy. Existing offline backups cannot be retroactively changed by a live database mutation; the operator must manage encrypted backup expiry and deletion handling.
+For any research already claimed by a worker, deletion first records a content-free central cleanup task. The source worker drains it, erases both roles’ retained model payloads and identifying model-call metadata, and records a tombstone that prevents late model responses from recreating the text. Leased, signed receipts confirm this bounded cleanup; an unavailable worker leaves deletion explicitly pending. Admin status includes pending cleanup counts and the oldest request. External vendor logs/traces and historical backups require the operator’s separate retention and deletion policy.
+
+After Discord revocation and required SAMV2 cleanup, purge email/identity/credentials and retain anonymous issuance and lineage tombstones. Collectible supply does not refill. Remove corresponding personal data from exports and honor the documented backup retention policy. Existing offline backups cannot be retroactively changed by a live database mutation; the operator must manage encrypted backup expiry and deletion handling.
 
 Protected administrator endpoints require the existing bearer token:
 
 - `GET /api/admin/members/status`: counts only, no email bodies or codes.
 - `POST /api/admin/members/:id/revoke-device`: `{confirmUserId,deviceId,recoveryReason}`.
-- `POST /api/admin/members/:id/delete`: `{confirmUserId,confirmDelete:"DELETE THIS MEMBER"}`. A `202 requested` result means external revocation is still pending.
+- `POST /api/admin/members/:id/delete`: `{confirmUserId,confirmDelete:"DELETE THIS MEMBER"}`. A `202 requested` result means Discord revocation or SAMV2 cleanup is still pending. Completion describes the application’s live datastores, not a vendor or historical-backup erasure attestation.
 
 Do not automate identity recovery from a public UserID or a claim posted in Discord.
 

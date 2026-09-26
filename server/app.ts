@@ -207,6 +207,7 @@ export function createApp(opts: AppOptions) {
     if (!adminLimiter.check(clientIp(c),now()).ok || !authed(c,opts.adminToken)) return notFound(c)
     return c.json({ok:true,enabled:members.enabled,email:mailHealth(opts.db),
       members:opts.db.prepare('SELECT COUNT(*) count FROM members WHERE disabled_at IS NULL').get(),
+      researchCleanup:opts.db.prepare('SELECT state,COUNT(*) count,MIN(requested_at) oldestRequestedAt FROM member_research_deletions GROUP BY state').all(),
       research:opts.db.prepare('SELECT status,COUNT(*) count FROM member_research GROUP BY status').all()})
   })
   app.post('/api/admin/members/:id/revoke-device', async c => {

@@ -54,3 +54,5 @@ in the release plan. Private legacy member keys are never exposed as public User
 npm test
 npm run typecheck
 ```
+
+Database recovery: [`docs/MEMBER_BACKUP_RESTORE.md`](docs/MEMBER_BACKUP_RESTORE.md) documents the encrypted snapshot/restore command and remaining off-volume activation work.

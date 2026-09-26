@@ -104,6 +104,19 @@ describe('member deletion lifecycle', () => {
     expect(f.db.prepare('SELECT * FROM member_email_outbox').all()).toHaveLength(0)
   })
 
+  it('does not report completion until claimed research has a central cleanup receipt', () => {
+    const f = fixture()
+    f.db.prepare("UPDATE member_research SET attempts=1,status='system_check',lease_token='in-flight'").run()
+    expect(requestMemberDeletion(f.db,1,'Founder',NOW)).toBe(true)
+    expect(f.db.prepare('SELECT state FROM member_deletions').get()!.state).toBe('requested')
+    expect(f.db.prepare('SELECT * FROM member_research').all()).toHaveLength(0)
+    expect(finalizeMemberDeletions(f.db,NOW)).toBe(0)
+    f.db.prepare("UPDATE member_research_deletions SET state='completed',completed_at=?").run(NOW+1)
+    expect(finalizeMemberDeletions(f.db,NOW+1)).toBe(1)
+    expect(f.db.prepare('SELECT state FROM member_deletions').get()!.state).toBe('completed')
+    expect(f.db.prepare('SELECT email FROM members').get()!.email).toMatch(/@deleted.invalid$/)
+  })
+
   it('keeps access revoked and retries an atomic purge after a database failure', () => {
     const f = fixture()
     f.db.exec("CREATE TRIGGER block_purge BEFORE DELETE ON member_email_outbox BEGIN SELECT RAISE(ABORT, 'test purge failure'); END")

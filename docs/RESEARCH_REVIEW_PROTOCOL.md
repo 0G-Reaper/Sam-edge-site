@@ -208,3 +208,14 @@ Register `/badge` with optional string `choice` constrained to `moon`, `stargaze
 ## Verification
 
 `tests/member-research.test.ts` exercises access and quest gating, URL rejection, per-member privacy, idempotency aliases, body and queue limits, HMAC and role separation, replay rejection, lease expiry, provider outages, false-claim attribution, one-time points, copied-content blocking, independent +3 evidence matching, cutoff leakage, atomic rollback, source-derived speed eligibility, appeal digest binding, explicit deletion, and authentic Discord intake confined to one channel.
+
+## Member deletion propagation
+
+The site creates a cleanup task only for a submission already leased to a worker, and removes the local research text immediately. These routes use the source worker’s existing HMAC authentication; the review credential is rejected. They expose no member identity or submitted text.
+
+- `POST /api/internal/research/deletion-claim` accepts `{limit:1}` (maximum 10). Each item contains `submissionId`, a five-minute `leaseToken`, and `leaseExpiresAt`. An expired lease can be reclaimed.
+- `POST /api/internal/research/deletion-receipt` accepts exactly `{submissionId,leaseToken,scope:"samv2-model-records-v1"}`. A receipt must match the current unexpired lease. Identical completed receipts can be retried with a fresh signed nonce.
+
+The source process must commit central erasure before acknowledging. Its transaction removes both source/review model payloads and associated identifying metadata, retains anonymous cost accounting, and creates a content-free erasure tombstone. The same transaction lock at the central model-record boundary prevents a late response from saving erased data again. This scope does not attest to model-vendor, external trace or backup erasure. A failed cleanup never becomes a successful receipt.
+
+Keep the source worker’s `--cleanup-only` mode operating if new model adjudication is paused. Alert on old pending cleanup jobs. A research receipt arriving after local deletion is rejected and cannot award points.

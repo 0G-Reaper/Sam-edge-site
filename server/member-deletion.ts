@@ -9,7 +9,7 @@ export function initMemberDeletion(db: Db) {
   )`)
 }
 
-/** Deliberate, one-account deletion. Disable access first; Discord removal must be reconciled. */
+/** Deliberate deletion. Disable access first; Discord and central research cleanup reconcile. */
 export function requestMemberDeletion(db: Db, memberId: number, confirmUserId: string, now=Date.now()): boolean {
   initMemberDeletion(db)
   const row=db.prepare('SELECT user_id,email FROM members WHERE id=?').get(memberId) as {user_id:string;email:string}|undefined
@@ -26,7 +26,7 @@ export function requestMemberDeletion(db: Db, memberId: number, confirmUserId: s
     db.prepare(`UPDATE member_email_outbox SET state='cancelled',body='',lease_id=NULL,lease_until=NULL,last_error='member_deletion'
       WHERE (member_id=? OR recipient=? COLLATE NOCASE) AND state!='accepted'`).run(memberId,row.email)
     db.prepare('UPDATE member_invites SET token_hash=NULL,recipient_email=NULL,expires_at=NULL,reserved_until=NULL WHERE member_id=? OR recipient_email=? COLLATE NOCASE').run(memberId,row.email)
-    deleteMemberResearch(db,memberId)
+    deleteMemberResearch(db,memberId,now)
     db.prepare("UPDATE discord_member_links SET state='revocation_pending',confirmation_hash=NULL,access_token_ciphertext=NULL,updated_at=? WHERE member_id=? AND state!='revoked'").run(now,memberId)
     db.prepare("INSERT OR IGNORE INTO member_deletions(member_id,state,requested_at) VALUES(?,'requested',?)").run(memberId,now)
     db.exec('COMMIT')
@@ -40,11 +40,12 @@ export function finalizeMemberDeletions(db:Db,now=Date.now()): number {
   initMemberDeletion(db)
   const rows=db.prepare(`SELECT m.id,m.email FROM member_deletions d JOIN members m ON m.id=d.member_id
     WHERE d.state='requested' AND NOT EXISTS(SELECT 1 FROM discord_member_links l WHERE l.member_id=m.id AND l.state!='revoked')
+    AND NOT EXISTS(SELECT 1 FROM member_research_deletions r WHERE r.member_id=m.id AND r.state!='completed')
     LIMIT 25`).all() as Array<{id:number;email:string}>
   for(const row of rows){
     db.exec('BEGIN IMMEDIATE')
     try{
-      deleteMemberResearch(db,row.id)
+      deleteMemberResearch(db,row.id,now)
       db.prepare('DELETE FROM waitlist WHERE id=? AND email=? COLLATE NOCASE').run(row.id,row.email)
       db.prepare('DELETE FROM member_email_outbox WHERE member_id=? OR recipient=? COLLATE NOCASE').run(row.id,row.email)
       db.prepare('DELETE FROM membership_request_nonces WHERE session_id IN (SELECT id FROM membership_sessions WHERE member_id=?)').run(row.id)

@@ -13,3 +13,9 @@ await build({
   banner: { js: "import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);" },
   logLevel: 'info',
 })
+
+await build({
+  entryPoints: ['scripts/member-backup.ts'], bundle: true, platform: 'node',
+  target: 'node22', format: 'esm', outfile: 'dist/scripts/member-backup.js',
+  sourcemap: false, legalComments: 'none', logLevel: 'info',
+})
