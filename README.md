@@ -1,8 +1,18 @@
-# SAM public site
+# SAM Edge site and member community
 
 The public landing page for SAM, the Synthetic Analyst Model, and the Edge waitlist.
 It is a standalone site: a static React front end served by a small Node server that
 stores waitlist signups in SQLite on a persistent volume.
+
+The members-only implementation adds verified-email access, ten personal invitations,
+two cryptographically registered browsers, quest profiles, capped digital collectibles,
+Discord OAuth/screening verification, and a durable research inbox with independently
+authenticated validation and review receipts. Integration activation is gated: absent
+credentials do not pretend to send email or award research points.
+
+See [member release and operating plan](docs/MEMBER_RELEASE_PLAN.md),
+[quest rules](docs/QUEST_RULES.md), [Discord setup](docs/DISCORD_MEMBER_SETUP.md),
+and [research protocol](docs/RESEARCH_REVIEW_PROTOCOL.md) before activation.
 
 ## Run locally
 
@@ -33,8 +43,10 @@ curl -H "Authorization: Bearer $ADMIN_TOKEN" https://<your-domain>/api/admin/exp
 curl -H "Authorization: Bearer $ADMIN_TOKEN" https://<your-domain>/api/admin/stats
 ```
 
-Each signup stores a user ID, an email address, a generated member key (`SAM-XXXX-XXXX-XXXX-XXXX`)
-and a timestamp. Nothing else is collected.
+Legacy signups store a user ID, email, generated member key and timestamp. Members-only
+cutover preserves those records, verifies the email and adds the profile, browser public
+keys, invitation/quest history, Discord ownership and attributable research records described
+in the release plan. Private legacy member keys are never exposed as public UserIDs.
 
 ## Checks
 

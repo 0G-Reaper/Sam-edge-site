@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import { memberFetch } from './member-api'
+import { readSiteConfig } from './site'
 
 export interface IndexSeries {
   key: string
@@ -20,8 +22,11 @@ export function useMarkets(): { data: MarketsPayload | null; error: boolean } {
   const [error, setError] = useState(false)
   useEffect(() => {
     const ac = new AbortController()
-    fetch('/api/markets', { signal: ac.signal, headers: { accept: 'application/json' } })
-      .then((r) => (r.ok ? (r.json() as Promise<MarketsPayload>) : Promise.reject(new Error(String(r.status)))))
+    const request = readSiteConfig().membersOnly
+      ? memberFetch<MarketsPayload>('/api/markets', { signal: ac.signal })
+      : fetch('/api/markets', { signal: ac.signal, headers: { accept: 'application/json' } })
+        .then((r) => (r.ok ? (r.json() as Promise<MarketsPayload>) : Promise.reject(new Error(String(r.status)))))
+    request
       .then(setData)
       .catch(() => {
         if (!ac.signal.aborted) setError(true)

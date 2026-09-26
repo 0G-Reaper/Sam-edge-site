@@ -31,7 +31,7 @@ function Tilt() {
   )
 }
 
-export default function AppBand() {
+export default function AppBand({ memberMode = false }: { memberMode?: boolean }) {
   return (
     <section id="app" className="appband" aria-labelledby="app-title">
       <div className="wrap appband__grid">
@@ -41,7 +41,7 @@ export default function AppBand() {
         <Reveal className="appband__copy" delay={0.1}>
           <span className="eyebrow">The app</span>
           <h2 id="app-title">
-            Join our <span className="grad">waitlist.</span>
+            {memberMode ? <>Research with <span className="grad">perspective.</span></> : <>Join our <span className="grad">waitlist.</span></>}
           </h2>
           <p className="lede">
             Edge is the app SAM lives in. One screen for the market's pulse, the names likely to move, and the research behind both. Built for people who want to understand, not just react.
@@ -64,8 +64,8 @@ export default function AppBand() {
             </li>
           </ul>
           <div>
-            <a className="btn btn--primary" href="#waitlist" data-magnetic>
-              Reserve your place
+            <a className="btn btn--primary" href={memberMode ? '#member-research' : '#waitlist'} data-magnetic>
+              {memberMode ? 'Contribute research' : 'Reserve your place'}
               <Arrow />
             </a>
           </div>
