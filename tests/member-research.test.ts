@@ -70,6 +70,20 @@ function modelReceipt(task: any) {
 }
 
 describe('durable member research', () => {
+  it('distinguishes earlier duplicates so later copies cannot disqualify the original', async () => {
+    const ctx = setup()
+    const first = await (await ctx.member('/api/member/research', input, 1)).json() as any
+    const second = await (await ctx.member('/api/member/research', input, 2)).json() as any
+    const { items } = await (await ctx.worker('/api/internal/research/claim', { limit: 5 })).json() as any
+    expect(items.find((t: any) => t.id === first.submission.id).earlierExactDuplicateCount).toBe(0)
+    expect(items.find((t: any) => t.id === second.submission.id).earlierExactDuplicateCount).toBe(1)
+    expect(items.every((t: any) => t.exactDuplicateCount === 1)).toBe(true)
+  })
+
+  it('matches the Python worker signature for an exact protocol vector', () => {
+    expect(researchSignature('k'.repeat(32), '1790427600000', 'a'.repeat(32), 'POST', '/api/internal/research/claim', '{"limit":1}'))
+      .toBe('566259187b744bc9c32b69dd3c73e7ef72fd0eb37757e1a5485b679c5b8aeebf')
+  })
   it('requires membership and completed Discord verification', async () => {
     const ctx = setup({ canSubmitResearch: () => false })
     expect((await ctx.app.request('/api/member/research')).status).toBe(401)

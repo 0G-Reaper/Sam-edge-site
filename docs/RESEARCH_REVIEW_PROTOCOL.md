@@ -104,7 +104,7 @@ Endpoints and roles:
 | `/api/internal/research/review-claim` | Independent review | `{ "limit": 5 }` |
 | `/api/internal/research/model-receipt` | Independent review | One independent model receipt |
 
-Each claim result contains `items` with `id`, `submission`, `appeals`, `inputDigest`, `asOf`, `submittedAt`, `exactDuplicateCount`, `leaseToken`, and `leaseExpiresAt`. `asOf` is the immutable cutoff from the initial submission time, or the latest authoritative appeal submission time when appeal evidence is being reviewed. Every source receipt must echo it exactly; worker retries cannot move the cutoff forward. Independent-review tasks additionally contain the exact `samReceipt` and `evidenceDigest`. A batch model request may review several tasks, but it must return a separate attributable receipt and decision for every task; no blanket batch approval.
+Each claim result contains `items` with `id`, `submission`, `appeals`, `inputDigest`, `asOf`, `submittedAt`, `exactDuplicateCount`, `earlierExactDuplicateCount`, `leaseToken`, and `leaseExpiresAt`. `asOf` is the immutable cutoff from the initial submission time, or the latest authoritative appeal submission time when appeal evidence is being reviewed. Every source receipt must echo it exactly; worker retries cannot move the cutoff forward. Independent-review tasks additionally contain the exact `samReceipt` and `evidenceDigest`. The earlier-duplicate count uses durable insertion order, so a later copier cannot disqualify the original submission. A batch model request may review several tasks, but it must return a separate attributable receipt and decision for every task; no blanket batch approval.
 
 ## Source-verification receipt
 
