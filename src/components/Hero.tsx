@@ -39,9 +39,9 @@ function GlobeSlot() {
   )
 }
 
-export default function Hero({ onMeetSam }: { onMeetSam: () => void }) {
+export default function Hero({ onMeetSam, memberMode = false }: { onMeetSam: () => void; memberMode?: boolean }) {
   return (
-    <section className="hero" id="top">
+    <section className="hero" id={memberMode ? 'meet-sam' : 'top'}>
       <div className="wrap hero__grid">
         <motion.div className="hero__copy" initial={{ opacity: 0, y: 22 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}>
           <span className="eyebrow">
@@ -55,8 +55,8 @@ export default function Hero({ onMeetSam }: { onMeetSam: () => void }) {
             Better information to think with. SAM reads the market's own record, weighs what actually moved prices, and hands you calibrated context. Never a tip.
           </p>
           <div className="hero__cta">
-            <a className="btn btn--primary" href="#waitlist" data-magnetic>
-              Join the waitlist
+            <a className="btn btn--primary" href={memberMode ? '#member-quests' : '#waitlist'} data-magnetic>
+              {memberMode ? 'Explore your quests' : 'Join the waitlist'}
               <Arrow />
             </a>
             <button type="button" className="btn btn--ghost" onClick={onMeetSam} data-magnetic>

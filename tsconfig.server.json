@@ -12,5 +12,5 @@
     "noUnusedLocals": true,
     "types": ["node"]
   },
-  "include": ["server", "tests"]
+  "include": ["server", "tests", "scripts/member-backup.ts"]
 }

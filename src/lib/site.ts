@@ -1,6 +1,7 @@
 export interface SiteConfig {
   instagram?: string
   discord?: string
+  membersOnly?: boolean
 }
 
 export function readSiteConfig(): SiteConfig {
@@ -13,6 +14,7 @@ export function readSiteConfig(): SiteConfig {
     return {
       instagram: typeof o.instagram === 'string' && o.instagram ? o.instagram : undefined,
       discord: typeof o.discord === 'string' && o.discord ? o.discord : undefined,
+      membersOnly: o.membersOnly === true,
     }
   } catch {
     return {}

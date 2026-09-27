@@ -10,10 +10,16 @@ import { addSignup, allSignups, countSignups } from './db.js'
 import { memberKey } from './keys.js'
 import type { MarketsPayload } from './markets.js'
 import { RateLimiter } from './ratelimit.js'
+import { membershipCutoverApplied, mountMemberPlatform, type MemberPlatformConfig, type MemberRuntime } from './members.js'
+import { mailHealth } from './mail.js'
+import { mailDeliveryHealth, mailProbeStatus, queueMailProbe } from './mail-events.js'
+import { revokeDevice } from './membership-auth.js'
+import { requestMemberDeletion } from './member-deletion.js'
 
 export interface SiteConfig {
   instagram?: string
   discord?: string
+  membersOnly?: boolean
 }
 
 export interface AppOptions {
@@ -30,6 +36,8 @@ export interface AppOptions {
   /** A mailto: or https: URI published at /.well-known/security.txt (RFC 9116). */
   securityContact?: string
   now?: () => number
+  membership?: MemberPlatformConfig
+  onMemberRuntime?: (runtime: MemberRuntime) => void
 }
 
 const MIN_FORM_MS = 2_500
@@ -125,10 +133,20 @@ export function createApp(opts: AppOptions) {
     await next()
   })
 
+  app.use('/api/*', bodyLimit({ maxSize: 128 * 1024 }))
+  const members = mountMemberPlatform(app,opts.db,opts.membership,now)
+  opts.onMemberRuntime?.(members)
+  site.membersOnly=members.enabled
+  if (members.enabled) {
+    // Public Discord invite URLs are never exposed by the private member shell.
+    site.discord=undefined
+    app.use('/api/markets',members.auth)
+  }
+
   app.get('/api/markets', async (c) => {
     try {
       const payload = await opts.markets()
-      c.header('Cache-Control', 'public, max-age=300')
+      c.header('Cache-Control', members.enabled ? 'no-store' : 'public, max-age=300')
       return c.json(payload)
     } catch {
       return c.json({ ok: false, error: 'unavailable' }, 503)
@@ -136,6 +154,7 @@ export function createApp(opts: AppOptions) {
   })
 
   app.post('/api/waitlist', bodyLimit({ maxSize: 4 * 1024 }), async (c) => {
+    if (members.enabled || membershipCutoverApplied(opts.db)) return c.json({ok:false,error:'invitation_required',message:'SAM membership is invitation-only. Existing members can sign in.'},403)
     const rl = signupLimiter.check(clientIp(c), now())
     if (!rl.ok) return tooMany(c, rl.retryAfter)
     if (!sameOrigin(c)) return c.json({ ok: false, error: 'forbidden', message: 'Cross-site requests are not accepted.' }, 403)
@@ -183,6 +202,55 @@ export function createApp(opts: AppOptions) {
     const rl = adminLimiter.check(clientIp(c), now())
     if (!rl.ok || !authed(c, opts.adminToken)) return notFound(c)
     return c.json({ ok: true, signups: countSignups(opts.db) })
+  })
+
+  app.get('/api/admin/members/status', c => {
+    if (!adminLimiter.check(clientIp(c),now()).ok || !authed(c,opts.adminToken)) return notFound(c)
+    return c.json({ok:true,enabled:members.enabled,email:mailHealth(opts.db),
+      emailDelivery:mailDeliveryHealth(opts.db,opts.membership?.mail,now()),
+      members:opts.db.prepare('SELECT COUNT(*) count FROM members WHERE disabled_at IS NULL').get(),
+      researchCleanup:opts.db.prepare('SELECT state,COUNT(*) count,MIN(requested_at) oldestRequestedAt FROM member_research_deletions GROUP BY state').all(),
+      research:opts.db.prepare('SELECT status,COUNT(*) count FROM member_research GROUP BY status').all()})
+  })
+  app.post('/api/admin/members/email-probe', async c => {
+    if (!adminLimiter.check(clientIp(c),now()).ok || !authed(c,opts.adminToken) || !sameOrigin(c)) return notFound(c)
+    const input=z.object({probeId:z.uuid()}).strict().safeParse(await c.req.json().catch(()=>null))
+    if (!input.success) return invalid(c,'Provide one delivery-check reference.')
+    try {
+      return c.json({ok:true,probe:queueMailProbe(opts.db,opts.membership?.mail,input.data.probeId,now())},202)
+    } catch (error) {
+      if (error instanceof Error && error.message==='email_probe_unconfigured') return c.json({ok:false,error:error.message},503)
+      if (error instanceof Error && error.message==='email_probe_cooldown') return tooMany(c,600)
+      throw error
+    }
+  })
+  app.get('/api/admin/members/email-probe/:probeId', c => {
+    if (!adminLimiter.check(clientIp(c),now()).ok || !authed(c,opts.adminToken)) return notFound(c)
+    const id=z.uuid().safeParse(c.req.param('probeId'))
+    if (!id.success) return notFound(c)
+    const probe=mailProbeStatus(opts.db,id.data)
+    return probe ? c.json({ok:true,probe}) : notFound(c)
+  })
+  app.post('/api/admin/members/:id/revoke-device', async c => {
+    if (!adminLimiter.check(clientIp(c),now()).ok || !authed(c,opts.adminToken) || !sameOrigin(c)) return notFound(c)
+    const input = z.object({confirmUserId:z.string().min(2).max(32),deviceId:z.uuid(),recoveryReason:z.string().min(20).max(500)}).safeParse(await c.req.json().catch(()=>null))
+    const id=Number(c.req.param('id'))
+    if (!input.success || !Number.isSafeInteger(id) || id<1) return invalid(c,'Specify one member, browser and verified recovery reason.')
+    const member=opts.db.prepare('SELECT user_id FROM members WHERE id=? AND disabled_at IS NULL').get(id) as {user_id:string}|undefined
+    if (!member || member.user_id!==input.data.confirmUserId) return notFound(c)
+    const revoked=revokeDevice(opts.db,id,input.data.deviceId,now())
+    if (!revoked) return notFound(c)
+    opts.db.prepare('INSERT INTO membership_audit(member_id,event,detail,created_at) VALUES(?,?,?,?)').run(id,'administrator_device_recovery',input.data.recoveryReason,now())
+    return c.json({ok:true})
+  })
+  app.post('/api/admin/members/:id/delete', async c => {
+    if (!adminLimiter.check(clientIp(c),now()).ok || !authed(c,opts.adminToken) || !sameOrigin(c)) return notFound(c)
+    const parsed=z.object({confirmUserId:z.string().min(2).max(32),confirmDelete:z.literal('DELETE THIS MEMBER')}).safeParse(await c.req.json().catch(()=>null))
+    const id=Number(c.req.param('id'))
+    if(!parsed.success || !Number.isSafeInteger(id) || id<1) return invalid(c,'Confirm the exact member to delete.')
+    if(!requestMemberDeletion(opts.db,id,parsed.data.confirmUserId,now())) return notFound(c)
+    const deletion=opts.db.prepare('SELECT state FROM member_deletions WHERE member_id=?').get(id) as {state:string}
+    return c.json({ok:true,state:deletion.state,accessRevoked:true},deletion.state==='completed'?200:202)
   })
 
   app.all('/api/*', (c) => notFound(c))
@@ -289,10 +357,10 @@ function originOf(c: Context, production: boolean): string {
 const rendered = new Map<string, string>()
 
 export function renderIndex(template: string, site: SiteConfig, origin: string): string {
-  const cacheKey = origin
+  const cacheKey = `${origin}:${JSON.stringify(site)}`
   const hit = rendered.get(cacheKey)
   if (hit) return hit
-  const config = JSON.stringify({ instagram: site.instagram ?? '', discord: site.discord ?? '' }).replace(/</g, '\\u003c')
+  const config = JSON.stringify({ instagram: site.instagram ?? '', discord: site.discord ?? '', membersOnly: site.membersOnly === true }).replace(/</g, '\\u003c')
   const out = template.replaceAll('__ORIGIN__', origin).replace('__SITE_CONFIG__', config)
   if (rendered.size > 32) rendered.clear()
   rendered.set(cacheKey, out)

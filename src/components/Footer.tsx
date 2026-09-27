@@ -1,7 +1,7 @@
 import { readSiteConfig } from '../lib/site'
 import { Discord, Instagram, Logo } from './Icons'
 
-export default function Footer({ onMeetSam }: { onMeetSam: () => void }) {
+export default function Footer({ onMeetSam, memberMode = false }: { onMeetSam: () => void; memberMode?: boolean }) {
   const cfg = readSiteConfig()
   return (
     <footer className="footer">
@@ -19,11 +19,18 @@ export default function Footer({ onMeetSam }: { onMeetSam: () => void }) {
           </p>
         </div>
         <nav className="footer__links" aria-label="Footer">
-          <a href="#what">What SAM is</a>
-          <a href="#how">How it thinks</a>
-          <a href="#app">The app</a>
-          <a href="#who">Who we are</a>
-          <a href="#waitlist">Join the waitlist</a>
+          {memberMode ? <>
+            <a href="#member-quests">Your quests</a>
+            <a href="#member-invites">Invitations</a>
+            <a href="#member-research">Research inbox</a>
+            <a href="#member-discord">Member Discord</a>
+          </> : <>
+            <a href="#what">What SAM is</a>
+            <a href="#how">How it thinks</a>
+            <a href="#app">The app</a>
+            <a href="#who">Who we are</a>
+          </>}
+          <a href={memberMode ? '#profile' : '#waitlist'}>{memberMode ? 'Member profile' : 'Join the waitlist'}</a>
           <button type="button" onClick={onMeetSam}>Replay the introduction</button>
         </nav>
         <div className="footer__social">
@@ -37,7 +44,9 @@ export default function Footer({ onMeetSam }: { onMeetSam: () => void }) {
               <Instagram /> Instagram <em>coming soon</em>
             </span>
           )}
-          {cfg.discord ? (
+          {memberMode ? (
+            <a className="social" href="#member-discord"><Discord /> Member Discord</a>
+          ) : cfg.discord ? (
             <a className="social" href={cfg.discord} target="_blank" rel="noopener noreferrer">
               <Discord /> Discord
             </a>

@@ -7,8 +7,14 @@ const LINKS: Array<[string, string]> = [
   ['#app', 'The app'],
   ['#who', 'Who we are'],
 ]
+const MEMBER_LINKS: Array<[string, string]> = [
+  ['#member-quests', 'Your quests'],
+  ['#member-invites', 'Invitations'],
+  ['#member-research', 'Research inbox'],
+  ['#member-discord', 'Discord'],
+]
 
-export default function Nav({ onMeetSam }: { onMeetSam: () => void }) {
+export default function Nav({ onMeetSam, memberMode = false }: { onMeetSam: () => void; memberMode?: boolean }) {
   const [open, setOpen] = useState(false)
   const [hidden, setHidden] = useState(false)
   const [solid, setSolid] = useState(false)
@@ -34,7 +40,7 @@ export default function Nav({ onMeetSam }: { onMeetSam: () => void }) {
           <span className="brand__tag">Edge</span>
         </a>
         <nav className="nav__links" aria-label="Sections">
-          {LINKS.map(([href, label]) => (
+          {(memberMode ? MEMBER_LINKS : LINKS).map(([href, label]) => (
             <a key={href} href={href} onClick={() => setOpen(false)}>
               {label}
             </a>
@@ -50,8 +56,8 @@ export default function Nav({ onMeetSam }: { onMeetSam: () => void }) {
             Meet SAM
           </button>
         </nav>
-        <a href="#waitlist" className="btn btn--primary btn--sm nav__cta" data-magnetic>
-          Join the waitlist
+        <a href={memberMode ? '#profile' : '#waitlist'} className="btn btn--primary btn--sm nav__cta" data-magnetic>
+          {memberMode ? 'Member profile' : 'Join the waitlist'}
         </a>
         <button
           type="button"
