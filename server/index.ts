@@ -7,6 +7,7 @@ import { openDb } from './db.js'
 import { getMarkets } from './markets.js'
 import { discordConfigFromEnv } from './member-discord.js'
 import type { MemberRuntime } from './members.js'
+import { OperatorProbeError, runOperatorEmailProbe } from './operator-email-probe.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const clientDir = resolve(here, '../client')
@@ -54,8 +55,15 @@ const membershipWorker=setInterval(()=>{
 },15_000)
 membershipWorker.unref()
 
+const probeController = new AbortController()
 const server = serve({ fetch: app.fetch, port, hostname: '0.0.0.0' }, (info) => {
   console.log(`sam-edge-site listening on :${info.port} (${production ? 'production' : 'development'})`)
+  if (process.env.MEMBER_EMAIL_PROBE_ID) {
+    void runOperatorEmailProbe(process.env, { signal: probeController.signal })
+      .then(result => console.info(JSON.stringify(result)))
+      .catch(error => console.error(JSON.stringify({ event: 'member_email_probe_failed',
+        code: error instanceof OperatorProbeError ? error.code : 'cancelled_or_internal_error' })))
+  }
 })
 
 function cleanUrl(value: string | undefined): string | undefined {
@@ -81,6 +89,7 @@ function cleanContact(value: string | undefined): string | undefined {
 }
 
 function shutdown() {
+  probeController.abort()
   clearInterval(membershipWorker)
   server.close(() => {
     try {

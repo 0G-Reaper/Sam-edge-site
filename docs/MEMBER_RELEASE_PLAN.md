@@ -36,6 +36,7 @@ Keep secrets in protected service variables. Never put them in chat, Git, client
 | `MEMBER_EMAIL_FROM` | Verified sender address/name owned by the operator. |
 | `RESEND_WEBHOOK_SECRET` | Separate signing secret for delivery events at `/api/webhooks/resend`. |
 | `MEMBER_EMAIL_PROBE_TO` | Operator-owned mailbox for the protected prelaunch delivery check. Never supplied by an HTTP caller. |
+| `MEMBER_EMAIL_PROBE_ID` | Optional UUID that runs one bounded operator check at startup, using the existing administrator credential internally. Set only after the live webhook is ready; clear after completion. |
 | `MEMBER_PUBLIC_ORIGIN` | Exact HTTPS origin, without trailing slash. |
 | `DISCORD_MEMBER_ENABLED=true` | Explicit operational gate after channel/role/screening verification. |
 | `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET` | Existing official Discord application's OAuth configuration. |

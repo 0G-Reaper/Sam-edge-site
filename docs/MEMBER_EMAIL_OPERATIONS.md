@@ -15,6 +15,14 @@ This release implements the receiving endpoint and operator delivery check. Conf
 
 ## What the status means
 
+### Running the check without copying the administrator credential
+
+An operator who controls the deployment can set `MEMBER_EMAIL_PROBE_ID` to one new UUID in protected service configuration and restart the reviewed service **after the live callback endpoint and provider webhook are ready**. On startup, a bounded check calls the same protected HTTP endpoints using the existing `ADMIN_TOKEN` internally. The target must be the configured canonical HTTPS origin; redirects are rejected. It refuses to send if membership is already active or any member has been imported. The recipient remains the existing server-configured probe mailbox.
+
+The check lasts at most three minutes, uses the durable UUID deduplication and cooldown, and reports only the reference, outbox ID, signed-delivery timestamps and aggregate counts in service logs. A failure never logs credentials, email addresses, provider response bodies or raw exceptions. It does not stop the website. `member_email_probe_delivered` requires both a signed delivery receipt and membership remaining inactive; the original signup count must not decrease. A count check alone is not a database restore test.
+
+Set `MEMBER_EMAIL_PROBE_ID` back to an empty value after the check. Restarts with the same UUID do not send a new copy. A successful old reference is evidence about that same message, not a fresh delivery test. Do not enable this check before the endpoint is deployed or use it after membership activation. Checking the actual mailbox remains a separate step.
+
 `GET /api/admin/members/status` retains the existing queue counts in `email` and adds aggregate `emailDelivery` diagnostics. It does not return addresses, message text, verification codes, provider payloads or secrets.
 
 | Observation | Meaning |
