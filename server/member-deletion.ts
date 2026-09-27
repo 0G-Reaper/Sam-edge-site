@@ -23,6 +23,8 @@ export function requestMemberDeletion(db: Db, memberId: number, confirmUserId: s
     // research after deletion is requested. Already accepted provider mail cannot be recalled.
     db.prepare('DELETE FROM membership_challenges WHERE member_id=? OR email=? COLLATE NOCASE').run(memberId,row.email)
     db.prepare('DELETE FROM discord_oauth_flows WHERE member_id=?').run(memberId)
+    db.prepare(`DELETE FROM member_email_events WHERE outbox_id IN
+      (SELECT id FROM member_email_outbox WHERE member_id=? OR recipient=? COLLATE NOCASE)`).run(memberId,row.email)
     db.prepare(`UPDATE member_email_outbox SET state='cancelled',body='',lease_id=NULL,lease_until=NULL,last_error='member_deletion'
       WHERE (member_id=? OR recipient=? COLLATE NOCASE) AND state!='accepted'`).run(memberId,row.email)
     db.prepare('UPDATE member_invites SET token_hash=NULL,recipient_email=NULL,expires_at=NULL,reserved_until=NULL WHERE member_id=? OR recipient_email=? COLLATE NOCASE').run(memberId,row.email)

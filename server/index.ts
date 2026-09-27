@@ -35,7 +35,8 @@ const app = createApp({
   securityContact: cleanContact(process.env.SECURITY_CONTACT),
   membership: {
     enabled:process.env.MEMBER_ACCESS_ENABLED==='true',
-    mail:{enabled:process.env.MEMBER_EMAIL_ENABLED==='true',apiKey:process.env.RESEND_API_KEY,from:process.env.MEMBER_EMAIL_FROM},
+    mail:{enabled:process.env.MEMBER_EMAIL_ENABLED==='true',apiKey:process.env.RESEND_API_KEY,from:process.env.MEMBER_EMAIL_FROM,
+      webhookSecret:process.env.RESEND_WEBHOOK_SECRET,probeTo:process.env.MEMBER_EMAIL_PROBE_TO},
     discord:discordConfigFromEnv(),
     researchKey:process.env.SAM_RESEARCH_SHARED_KEY,
     reviewKey:process.env.SAM_REVIEW_SHARED_KEY,

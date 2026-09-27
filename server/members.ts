@@ -6,6 +6,7 @@ import { awardReview, canStartDiscordQuest, getMemberProfile, initMembershipQues
 import { mountMemberDiscord, discordReadiness, type MemberDiscordConfig } from './member-discord.js'
 import { mountMemberResearch } from './member-research.js'
 import { deliverMailBatch, enqueueMail, initMail, mailReady, type MailConfig } from './mail.js'
+import { mountMailWebhook } from './mail-events.js'
 import { finalizeMemberDeletions, initMemberDeletion } from './member-deletion.js'
 
 export interface MemberPlatformConfig {
@@ -36,6 +37,7 @@ export function mountMemberPlatform(app: Hono, db: Db, config: MemberPlatformCon
   const enabled = config.enabled === true || membershipCutoverApplied(db)
   initializeMembershipSchema(db, now(), enabled)
   initMail(db)
+  mountMailWebhook(app,db,config.mail,now)
   initMembershipQuests(db)
   initMemberDeletion(db)
   const emailConfigured = mailReady(config.mail)
@@ -87,9 +89,14 @@ export function mountMemberPlatform(app: Hono, db: Db, config: MemberPlatformCon
   })
   let busy = false
   return {enabled,auth,async tick(){
-    if (!enabled || busy) return
+    if (busy) return
     busy=true
-    try { await deliverMailBatch(db,config.mail ?? {},5); await discord.reconcile(10); finalizeMemberDeletions(db,now()) }
+    try {
+      // An administrator can prove delivery before the private-access cutover. Ordinary
+      // membership email and external quest reconciliation still require activation.
+      await deliverMailBatch(db,config.mail ?? {},5,!enabled)
+      if (enabled) { await discord.reconcile(10); finalizeMemberDeletions(db,now()) }
+    }
     finally {busy=false}
   }}
 }

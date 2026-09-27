@@ -12,6 +12,7 @@ import type { MarketsPayload } from './markets.js'
 import { RateLimiter } from './ratelimit.js'
 import { membershipCutoverApplied, mountMemberPlatform, type MemberPlatformConfig, type MemberRuntime } from './members.js'
 import { mailHealth } from './mail.js'
+import { mailDeliveryHealth, mailProbeStatus, queueMailProbe } from './mail-events.js'
 import { revokeDevice } from './membership-auth.js'
 import { requestMemberDeletion } from './member-deletion.js'
 
@@ -206,9 +207,29 @@ export function createApp(opts: AppOptions) {
   app.get('/api/admin/members/status', c => {
     if (!adminLimiter.check(clientIp(c),now()).ok || !authed(c,opts.adminToken)) return notFound(c)
     return c.json({ok:true,enabled:members.enabled,email:mailHealth(opts.db),
+      emailDelivery:mailDeliveryHealth(opts.db,opts.membership?.mail,now()),
       members:opts.db.prepare('SELECT COUNT(*) count FROM members WHERE disabled_at IS NULL').get(),
       researchCleanup:opts.db.prepare('SELECT state,COUNT(*) count,MIN(requested_at) oldestRequestedAt FROM member_research_deletions GROUP BY state').all(),
       research:opts.db.prepare('SELECT status,COUNT(*) count FROM member_research GROUP BY status').all()})
+  })
+  app.post('/api/admin/members/email-probe', async c => {
+    if (!adminLimiter.check(clientIp(c),now()).ok || !authed(c,opts.adminToken) || !sameOrigin(c)) return notFound(c)
+    const input=z.object({probeId:z.uuid()}).strict().safeParse(await c.req.json().catch(()=>null))
+    if (!input.success) return invalid(c,'Provide one delivery-check reference.')
+    try {
+      return c.json({ok:true,probe:queueMailProbe(opts.db,opts.membership?.mail,input.data.probeId,now())},202)
+    } catch (error) {
+      if (error instanceof Error && error.message==='email_probe_unconfigured') return c.json({ok:false,error:error.message},503)
+      if (error instanceof Error && error.message==='email_probe_cooldown') return tooMany(c,600)
+      throw error
+    }
+  })
+  app.get('/api/admin/members/email-probe/:probeId', c => {
+    if (!adminLimiter.check(clientIp(c),now()).ok || !authed(c,opts.adminToken)) return notFound(c)
+    const id=z.uuid().safeParse(c.req.param('probeId'))
+    if (!id.success) return notFound(c)
+    const probe=mailProbeStatus(opts.db,id.data)
+    return probe ? c.json({ok:true,probe}) : notFound(c)
   })
   app.post('/api/admin/members/:id/revoke-device', async c => {
     if (!adminLimiter.check(clientIp(c),now()).ok || !authed(c,opts.adminToken) || !sameOrigin(c)) return notFound(c)

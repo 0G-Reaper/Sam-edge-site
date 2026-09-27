@@ -34,6 +34,8 @@ Keep secrets in protected service variables. Never put them in chat, Git, client
 | `MEMBER_EMAIL_ENABLED=true` | Enable configured transactional email worker after sender verification. |
 | `RESEND_API_KEY` | Server-only sending credential. Adapter uses the official email API. |
 | `MEMBER_EMAIL_FROM` | Verified sender address/name owned by the operator. |
+| `RESEND_WEBHOOK_SECRET` | Separate signing secret for delivery events at `/api/webhooks/resend`. |
+| `MEMBER_EMAIL_PROBE_TO` | Operator-owned mailbox for the protected prelaunch delivery check. Never supplied by an HTTP caller. |
 | `MEMBER_PUBLIC_ORIGIN` | Exact HTTPS origin, without trailing slash. |
 | `DISCORD_MEMBER_ENABLED=true` | Explicit operational gate after channel/role/screening verification. |
 | `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET` | Existing official Discord application's OAuth configuration. |
@@ -50,13 +52,13 @@ Keep secrets in protected service variables. Never put them in chat, Git, client
 | `MEMBER_BACKUP_KEY` | Protected base64 32-byte key for the administrative backup process; retain separately from ciphertext. |
 | `ADMIN_TOKEN` | Existing administrator bearer credential; never share with members or workers. |
 
-The web server drains the persistent email outbox and reconciles Discord revocations every 15 seconds with overlap prevention. It does not run a fictional AI reviewer when workers are absent. Accepted email means the provider accepted it; inbox delivery needs provider-event evidence. Retries reuse one idempotency key and stop before its validity window ends.
+The web server drains the persistent email outbox and reconciles Discord revocations every 15 seconds with overlap prevention. Before membership activation, only an explicitly requested administrator delivery probe may send. It does not run a fictional AI reviewer when workers are absent. Accepted email means the provider accepted it. Signed delivery events prove recipient mail-server acceptance; actual inbox arrival still needs a mailbox check. Retries reuse one idempotency key and stop before its validity window ends. See `MEMBER_EMAIL_OPERATIONS.md` for the delivery callback, suppression behavior, private diagnostics and prelaunch probe.
 
 ## Activation sequence
 
 1. Finish review of this branch. Pass unit/integration tests and a production build. Run a real browser flow in a private staging environment using test accounts before enforcing access on the live domain.
 2. Take a consistent SQLite backup while preserving the existing volume. Record signup count; test restoring into an isolated database. Use the implemented encrypted snapshot/restore command in `MEMBER_BACKUP_RESTORE.md`, then connect off-volume storage with operator-owned retention and test downloading/restoring a real backup. A volume alone is not a backup.
-3. Configure the email sender through the provider's protected interface; verify domain authentication and one delivery to an operator-controlled mailbox. Confirm restart/retry behavior and that message bodies are erased after acceptance. Do not enable membership before this succeeds.
+3. Configure the email sender and signed delivery webhook through protected provider/service fields. Use the administrator-only probe in `MEMBER_EMAIL_OPERATIONS.md` to verify domain authentication, a signed delivery receipt and actual arrival at an operator-controlled mailbox before membership activation. Confirm restart/retry behavior and that message bodies are erased after acceptance. Do not enable membership before this succeeds.
 4. Confirm owner recovery is operational. Test an existing member's stored email, then two browser registrations and third-registration rejection. Lost-browser recovery must revoke the old key before admitting a replacement.
 5. Merge/deploy the exact reviewed commit, preserving the SQLite path and volume. Activate `MEMBER_ACCESS_ENABLED` only after the email and recovery gates pass. Keep the legacy waitlist closed afterward, including during outages.
 6. Complete the existing Discord bot installation/human verification, then store credentials in protected fields. Set one dedicated Verified Member role; remove anonymous access to member categories; deny ordinary members invitation creation; revoke old general invite links; preserve staff restrictions. Check forwarded invites cannot expose member research.
